@@ -7,6 +7,8 @@ license: MIT
 metadata:
   hermes:
     tags: [movies, tv-shows, deals, price-tracking, cheapcharts, api, atl, all-time-low]
+    required_commands: [python]
+    related_skills: [publishing-agent-skills]
 ---
 
 # CheapCharts API Skill
