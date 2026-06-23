@@ -6,9 +6,19 @@ Verifies whether current CheapCharts deals are at their all-time low
 using the authoritative priceHdIsLowest / priceSdIsLowest flags from
 DetailData. Use the SKILL.md ATL recipe for full context.
 
+Coverage reality (verified 2026-06-23): iTunes has the most complete
+catalog and the most stable Deals endpoint. Amazon, Vudu, and Google
+Play are supported mechanically (the script accepts --store for all
+four) but the underlying CheapCharts data is sparser on those stores
+and the Deals endpoint is more likely to return a server-side error.
+For non-iTunes stores, --title lookups work more reliably than batch
+mode.
+
 Usage:
-    python atl_check.py                       # batch: all current deals at ATL
+    python atl_check.py                       # batch: all current deals at ATL (iTunes)
     python atl_check.py --title "Fight Club"  # single title lookup
+    python atl_check.py --store amazon        # batch on a specific store
+    python atl_check.py --store amazon --title "Fight Club"  # single lookup on a specific store
     python atl_check.py --type seasons        # check TV seasons instead of movies
     python atl_check.py --limit 30            # narrower deal pool
     python atl_check.py --min-savings 5       # only show items with $5+ savings
@@ -119,7 +129,11 @@ def check_batch(item_type, store=DEFAULT_STORE, country=DEFAULT_COUNTRY, limit=D
     )
     data = fetch(deals_url)
     if data.get("status") != "success":
-        print(f"  deals fetch failed: {data.get('message', 'unknown')}", file=sys.stderr)
+        msg = data.get("message", "unknown")
+        print(f"  deals fetch failed: {msg}", file=sys.stderr)
+        if store != DEFAULT_STORE:
+            print(f"  note: CheapCharts' Deals endpoint is most stable for iTunes. For {store},", file=sys.stderr)
+            print(f"  try --title <name> for a single-title lookup, or use --store itunes for batch.", file=sys.stderr)
         return 2
     deals = data.get("results", {}).get(item_type, [])
     if not deals:

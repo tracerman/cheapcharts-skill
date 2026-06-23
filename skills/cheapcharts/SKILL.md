@@ -1,7 +1,7 @@
 ---
 name: cheapcharts
 description: "Use when looking up digital movie/TV show prices, deals, charts, or recommendations across iTunes, Amazon, Vudu, and Google Play. Free public API, no auth required."
-version: 1.3.0
+version: 1.4.0
 author: tracerman (built with love and coffee)
 license: MIT
 metadata:
@@ -526,6 +526,8 @@ Prompt: |
 
 29. **Before adding a recipe to this skill, check `scripts/` for an existing tool that already does the workflow.** This skill ships with `scripts/atl_check.py` (parallel batch ATL checker with CLI flags, JSON output, proper exit codes). The skill's inline bash recipes for ATL filtering are 10-12x slower than the script (sequential DetailData calls vs parallel). Recipes should reference the script with a short invocation. When extending the skill: `ls scripts/` and `grep -n 'scripts/' SKILL.md` first, then add a one-line "run this script" recipe instead of inlining the workflow.
 
+30. **iTunes is the only store with reliable batch + complete catalog coverage.** The script accepts `--store` for all four stores, and single-title lookups work on Amazon/Vudu/Google Play, but the underlying CheapCharts data is sparser on those stores and the Deals endpoint returns a server-side error (HTTP 500, "There was an error handling the request") for many batch queries. Verified 2026-06-23: `--store amazon --limit 10` exits with code 2, while `--store itunes --limit 10` returns 80+ deals. For non-iTunes stores, prefer `--title <name>` lookups over batch mode, or fall back to Topseller (`gptapi/Topseller.php` with `store=itunes,amazon,vudu,googlePlay`) if you need cross-store batch data. Don't promise "all four stores" in agent reports without verifying the data for the specific title or genre.
+
 ## Verification Checklist
 
 - [ ] Correct endpoint selected for user intent (see Quick Decision Guide)
@@ -544,6 +546,7 @@ Prompt: |
 - [ ] Seasonal context mentioned if current date falls in a known sale window
 - [ ] For ATL questions ("lowest ever", "all-time low"): used `priceHdIsLowest` / `priceSdIsLowest` from DetailData, NOT parsed `priceHdEvolution` (Pitfall #26)
 - [ ] For cron / monitoring jobs that need ATL alerts: consider running `python scripts/atl_check.py --json` and parsing the output, instead of inlining the DetailData workflow
+- [ ] For non-iTunes stores: prefer `--title` lookups over batch mode (Pitfall #30); don't claim "all four stores" coverage without per-title verification
 
 ## Source
 

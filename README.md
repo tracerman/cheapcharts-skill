@@ -112,14 +112,14 @@ CheapCharts has a website that shows current prices, but it doesn't expose the a
 
 ## Supported stores
 
-| Store | Country support |
-|---|---|
-| iTunes / Apple TV | us, de, gb, fr, au, ca, at, ch, es, pt, ru, jp, tr, pl, in, cn |
-| Amazon | us, de |
-| Vudu | us |
-| Google Play | us |
+| Store | Country support | Coverage |
+|---|---|---|
+| iTunes / Apple TV | us, de, gb, fr, au, ca, at, ch, es, pt, ru, jp, tr, pl, in, cn | Full - this is the default and where the script works best |
+| Amazon | us, de | Supported via `--store amazon`; batch mode often returns a server-side error, single-title lookups work but data is sparser than iTunes |
+| Vudu | us | Supported via `--store vudu`; data is sparser than iTunes |
+| Google Play | us | Supported via `--store googlePlay`; data is sparser than iTunes |
 
-iTunes and Apple TV are used interchangeably - same underlying catalog. Apple rebranded iTunes Movies & TV Shows to the Apple TV app in 2019.
+iTunes and Apple TV are used interchangeably - same underlying catalog. Apple rebranded iTunes Movies & TV Shows to the Apple TV app in 2019. The script defaults to iTunes because that's where CheapCharts has the most complete catalog and the most reliable Deals endpoint. For non-iTunes stores, prefer `--title` lookups over batch mode.
 
 ## Install on every major agent platform
 
