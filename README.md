@@ -4,6 +4,24 @@
 
 *Built by [tracerman](https://github.com/tracerman) with love and coffee.*
 
+<p>
+  <a href="https://github.com/tracerman/cheapcharts-skill"><img src="https://img.shields.io/github/stars/tracerman/cheapcharts-skill?style=for-the-badge&logo=github&color=181717" alt="GitHub stars"></a>
+  <a href="https://github.com/tracerman/cheapcharts-skill/blob/main/LICENSE"><img src="https://img.shields.io/github/license/tracerman/cheapcharts-skill?style=for-the-badge&color=blue" alt="License"></a>
+  <a href="https://github.com/tracerman/cheapcharts-skill/releases"><img src="https://img.shields.io/github/v/release/tracerman/cheapcharts-skill?style=for-the-badge&color=success&logo=semantic-release" alt="Latest release"></a>
+  <a href="https://github.com/tracerman/cheapcharts-skill/actions"><img src="https://img.shields.io/github/actions/workflow/status/tracerman/cheapcharts-skill/tests.yml?style=for-the-badge&logo=github-actions&label=CI" alt="CI status"></a>
+  <br>
+  <a href="https://github.com/tracerman/cheapcharts-skill/issues"><img src="https://img.shields.io/github/issues/tracerman/cheapcharts-skill?style=for-the-badge&color=blue" alt="Issues"></a>
+  <a href="https://github.com/tracerman/cheapcharts-skill/commits/main"><img src="https://img.shields.io/github/last-commit/tracerman/cheapcharts-skill?style=for-the-badge&color=blue" alt="Last commit"></a>
+  <a href="https://skills.sh/"><img src="https://img.shields.io/badge/skills.sh-install-blueviolet?style=for-the-badge" alt="skills.sh install"></a>
+  <img src="https://img.shields.io/badge/python-3.9%2B-blue?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.9+">
+</p>
+
+## Demo
+
+![Apple TV drops on 2026-06-23](skills/cheapcharts/examples/demo-2026-06-23.png)
+
+The screenshot above is real output - the script ran against the live CheapCharts API on 2026-06-23 and verified each drop's `priceHdLastChangeDate` against the internal `DetailData` endpoint. ATL rows are highlighted in green; non-ATL rows show a `-` in the ATL column.
+
 ## What is this
 
 This is an **agent skill** that lets any AI agent (Hermes, Claude Code, OpenAI Codex, Cursor, etc.) look up movie and TV show prices across all four major US digital stores, and check whether a given drop is at the historical floor (all-time low / ATL).
@@ -102,6 +120,17 @@ CheapCharts has a website that shows current prices, but it doesn't expose the a
 | Google Play | us |
 
 iTunes and Apple TV are used interchangeably - same underlying catalog. Apple rebranded iTunes Movies & TV Shows to the Apple TV app in 2019.
+
+## Install on every major agent platform
+
+| Platform | Install |
+|---|---|
+| Vercel / skills.sh (any agent) | `npx skills add tracerman/cheapcharts-skill` |
+| Hermes Agent | `hermes skills install tracerman/cheapcharts-skill` |
+| Claude Code (slash command) | Copy `skills/cheapcharts/claude-code/cheapcharts.md` to `~/.claude/commands/` |
+| Plain Python | `git clone … && python skills/cheapcharts/scripts/atl_check.py --title "Bernie"` |
+
+The skill package follows the canonical [Agent Skills spec](https://agentskills.io/specification): one repo, one or more skill subdirectories under `skills/`, each with a `SKILL.md` and optional `scripts/`, `references/`, `assets/`. Tools like `npx skills` and `hermes skills install` both understand this layout.
 
 ## Contributing
 
