@@ -34,3 +34,6 @@ desktop.ini
 # Local env
 .env
 .env.local
+
+# Local Reddit drafts (kept out of public repo)
+examples/reddit-posts.md
