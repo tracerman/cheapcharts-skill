@@ -1,0 +1,673 @@
+---
+name: cheapcharts
+description: "Use when looking up digital movie/TV show prices, deals, charts, or recommendations across iTunes, Amazon, Vudu, and Google Play. Free public API, no auth required."
+version: 1.3.0
+author: tracerman (built with love and coffee)
+license: MIT
+metadata:
+  hermes:
+    tags: [movies, tv-shows, deals, price-tracking, cheapcharts, api, atl, all-time-low]
+---
+
+# CheapCharts API Skill
+
+> A free, public-API price tracker for digital movies and TV shows across iTunes (Apple TV), Amazon Prime Video, Vudu, and Google Play. No authentication, no rate limits.
+
+**Repo:** https://github.com/tracerman/cheapcharts-skill
+**API Base URL:** `https://buster.cheapcharts.de/v1/gptapi/`
+**All-time-low (ATL) check:** `https://buster.cheapcharts.de/v1/DetailData.php` (unofficial internal endpoint - see Pitfall #17)
+
+## Default Workflow (canonical pattern)
+
+When a user asks anything about deals, drops, prices, or "what's cheap right now", follow this flow:
+
+1. **Decide the store.** Default to `itunes` (US), or use `itunes,amazon,vudu,googlePlay` for multi-store.
+2. **Decide the item type.** `buymovies` for movies, `seasons` for TV, `all` for Search only.
+3. **Pull Deals with `sort=latestPricechange`** for "latest" / "today's drops" / "what just changed" questions. Use `sort=greatestSavings` for "best deals" or `sort=releaseDate` for "newest releases".
+4. **Verify "today" claims by hitting DetailData** for each candidate and checking `priceHdLastChangeDate` (or `priceSdLastChangeDate`). **Always check the response `status` field first** - `status=error` means your call failed silently otherwise (see Pitfall #15).
+5. **Filter out fake drops** (`priceBefore - price <= $1`) and bundle placeholder dates when sorting by `releaseDate`.
+6. **Enrich with the ATL flag** (`priceHdIsLowest` / `priceSdIsLowest`) from DetailData so every report can show whether each drop is at the historical floor. CheapCharts makes one extra call per item - see the standard report template in Presentation Guidelines.
+
+The full "today's drops" recipe with Python verification is in the Workflow Recipes section.
+
+## When to Use
+
+- User asks about movie/TV show prices on digital stores
+- User wants to find deals or discounts on digital movies
+- User wants to browse charts (what's popular/trending)
+- User wants recommendations in a genre
+- User wants to compare prices across stores (iTunes, Amazon, Vudu, Google Play)
+- User wants to check price history or lowest historical price
+- User mentions CheapCharts directly
+
+**Don't use for:** Physical media (Blu-ray/DVD), streaming subscription catalogs (Netflix/Disney+), movie reviews/criticism (use web search instead).
+
+## Quick Decision Guide
+
+| User says... | Use endpoint | Why |
+|---|---|---|
+| "Latest deals" / "today's drops" / "what just changed" | **Deals + DetailData** | Default workflow: sort=latestPricechange, then verify each item's priceHdLastChangeDate matches today (see Recipe: "Today's price drops") |
+| "Find deals under $X" | Deals | Filter by maxPrice + sort=greatestSavings |
+| "Best highly-rated deals" / "critically-acclaimed under $X" | Deals | Filter by imdbRating + maxPrice (both server-side filters, see Recipe) |
+| "4K / Dolby Vision / Atmos movies" | Deals + client filter | has4K=1 server filter doesn't work (Pitfall #16) - fetch then filter client-side |
+| "Newest releases on sale" | Deals | sort=releaseDate + bundle placeholder filter (see Pitfall #12) |
+| "What's popular right now" / "what's selling" | Charts or Topseller | Charts for one store, Topseller for cross-store |
+| "How much is [title]" | Search then Prices | Search to get imdbId, then Prices across stores (Pitfall #19: iTunes = Apple TV) |
+| "Best complete series deals" | Deals (seasons) | Filter isBundle=1 client-side (Recipe) |
+| "Recommend me a [genre] movie" | Recommendations | Pass specific genre + imdbRating (Pitfall #18: with no genre, returns chart data) |
+| "What's selling the most" | Topseller | Cross-store top sellers |
+| "Search for [title]" | Search | Title-based search, returns metadata |
+| "Is [title] at its all-time low?" / "deals at ATL" / "lowest price ever" | **Deals + DetailData** | DetailData exposes `priceHdIsLowest` / `priceSdIsLowest` flags - no need to parse `priceHdEvolution` (see Recipe: "All-time low (ATL) deals"). Use `priceHdEvolution` only if you need the actual historical low dollar amount or change-date of the prior ATL. |
+
+## API Endpoints
+
+### 1. Search - `Search.php`
+
+Find items by title. Use this FIRST when you only have a title and need the IMDb ID.
+
+**Required:** `action=search`, `query=<title>`
+**Optional:** `store=itunes` (default), `country=us` (default), `itemType=all` (default), `limit=20` (max 20), `offset=0`
+
+```bash
+curl -s "https://buster.cheapcharts.de/v1/gptapi/Search.php?action=search&store=itunes&country=us&itemType=all&query=Fight%20Club&limit=5"
+```
+
+Returns flat list: `{"status":"success","results":[...items...]}`. Each item includes `imdbId` (if available), `mediaType` (movies/seasons/ebooks/audiobooks/albums), `priceFollowUpItemType` (use this value as `itemType` for Prices API), and `cheapChartsProductPageUrl`.
+
+### 2. Charts - `Charts.php`
+
+Current chart rankings for movies or TV seasons.
+
+**Required:** `action=getCharts`, `store`, `country`, `itemType` (buymovies or seasons)
+**Optional:** `genre=All`, `quality=hd4k`, `limit`, `imdbRating` (min), `rottenTomatoesRating` (min), `releaseYear` (e.g. `2025-2025`)
+
+```bash
+curl -s "https://buster.cheapcharts.de/v1/gptapi/Charts.php?action=getCharts&store=itunes&country=us&itemType=buymovies&genre=All&quality=hd4k&limit=10"
+```
+
+Returns: `{"status":"success","results":{"buymovies":[...]}}`. Items include `rank` field.
+
+### 3. Deals - `Deals.php`
+
+Current deals and price drops. Best for bargain hunting.
+
+**Required:** `action=getDeals`, `store`, `country`, `itemType` (buymovies or seasons)
+**Optional:** `genre=All`, `quality=hd4k`, `sort=latestPricechange`, `maxPrice`, `releaseYear` (format: `2020-2025` - single year like `2026-2026` works too), `limit`, `imdbRating` (min rating, e.g. `imdbRating=7`), `rottenTomatoesRating` (min score, e.g. `rottenTomatoesRating=80`), `has4K=1` (DOES NOT WORK - ignored, filter client-side instead)
+
+**Sort options:** `latestPricechange` (default), `price`, `greatestSavings`, `greatestPercentageSavings`, `popularity`, `alphabetical`, `releaseDate` (ascending only - see Pitfall #11)
+
+**Date filter:** `releaseYear=YYYY-YYYY` accepts both single-year (`2026-2026`) and ranges (`2024-2026`). Works on Deals and Charts endpoints. NOT supported on Recommendations, Prices, or Search.
+
+```bash
+curl -s "https://buster.cheapcharts.de/v1/gptapi/Deals.php?action=getDeals&store=itunes&country=us&itemType=buymovies&genre=ActionAdventure&sort=greatestSavings&maxPrice=4.99&limit=20"
+```
+
+Returns: `{"status":"success","results":{"buymovies":[...]}}`. Items include `price`, `priceBefore`, `imdbRating`, `rottenTomatoesRating`.
+
+### 4. Prices - `Prices.php`
+
+Look up current prices for specific titles by IMDb ID.
+
+**Required:** `action=getPrices`, `store`, `country`, `itemType=buymovies`, `imdbIDs` (comma-separated, e.g. `tt0468569,tt2911666`)
+
+```bash
+curl -s "https://buster.cheapcharts.de/v1/gptapi/Prices.php?action=getPrices&store=itunes&country=us&itemType=buymovies&imdbIDs=tt0468569,tt2911666"
+```
+
+Returns: `{"status":"success","results":{"buymovies":[...]}}`. Same item shape as Deals.
+
+### 5. Recommendations - `Recommendations.php`
+
+Curated recommendations, filtered by genre and quality.
+
+**Required:** `action=getRecommendations`, `store`, `country`, `itemType` (buymovies or seasons)
+**Optional:** `genre=All`, `quality=hd4k`, `limit`, `imdbRating`, `rottenTomatoesRating`
+
+```bash
+curl -s "https://buster.cheapcharts.de/v1/gptapi/Recommendations.php?action=getRecommendations&store=amazon&country=us&itemType=buymovies&genre=SciFiFantasy&quality=hd4k&limit=15&imdbRating=7"
+```
+
+Returns: `{"status":"success","results":{"buymovies":[...]}}`. Items may include `description` field.
+
+### 6. Topseller - `Topseller.php`
+
+Top sellers across multiple stores. Does NOT require `itemType`.
+
+**Required:** `action=getTopsellerForStartpage`, `country`, `store` (comma-separated, e.g. `itunes,amazon,vudu,googlePlay`)
+**Optional:** `maxItemCount=5` (per store per category)
+
+```bash
+curl -s "https://buster.cheapcharts.de/v1/gptapi/Topseller.php?action=getTopsellerForStartpage&country=us&store=itunes,amazon,vudu,googlePlay&maxItemCount=5"
+```
+
+Returns: `{"status":"success","results":{"itunes":{"movies":[...],"seasons":[...]},"amazon":{...}}}`. Grouped by store, then by movies/seasons.
+
+### 7. DetailData (Internal) - `DetailData.php`
+
+**Not in the official gptapi docs.** Discovered by inspecting the CheapCharts website's network calls. Returns full item details including current prices, complete price history, and child seasons (for bundles). Works for both movies and seasons. **This is the reliable way to get season/bundle prices without a browser.**
+
+**Required:** `store`, `country`, `itemType` (`movies` or `seasons` - NOT `buymovies`), `idInStore` (the iTunes store ID from Search results)
+
+```bash
+curl -s "https://buster.cheapcharts.de/v1/DetailData.php?store=itunes&country=us&itemType=seasons&idInStore=1606238021"
+```
+
+Returns: `{"results":{"seasons":{...}}}` (key matches the `itemType` you passed).
+
+**Key fields (seasons):**
+
+| Field | Description |
+|---|---|
+| `priceSd` / `priceHd` | Current SD/HD price |
+| `priceSdBefore` / `priceHdBefore` | Previous price before last change |
+| `priceSdLastChangeDate` / `priceHdLastChangeDate` | Date of last price change |
+| `priceSdEvolution` / `priceHdEvolution` | Full price history as `date:+/-price~date:+/-price~...` string. `+` = price went up, `-` = price went down. See "Parsing priceHdEvolution" below - the delta convention is unreliable for reconstructing absolute prices; prefer the `IsLowest` flag. |
+| `priceSdIsLowest` / `priceHdIsLowest` | `1` if current SD/HD price equals the all-time low across CheapCharts' tracked history for this title, else `0`. **This is the canonical ATL check - use it instead of parsing `priceHdEvolution`.** |
+| `priceSdIsBest` / `priceHdIsBest` | `1` if current SD/HD price equals the best (lowest) price within the current sale window (i.e. current ongoing sale's floor), else `0`. Distinct from `IsLowest` - `IsBest=1, IsLowest=0` means "lowest of THIS sale but a previous sale went lower." |
+| `priceSdDropIndicator` / `priceHdDropIndicator` | `1` if price rose at last change, `-1` if it dropped, `0` if unchanged. Useful for filtering "real drops" without comparing to `priceBefore`. |
+| `isBundle` / `isSeasonBundle` | Whether this is a season bundle |
+| `isSeasonComplete` | Whether all seasons are included |
+| `childSeasonsCount` | Number of child seasons in the bundle |
+| `bundleSavings` / `bundleSavingsHd` | Savings vs buying seasons individually at regular price |
+| `saveOpportunity` / `saveOpportunityHd` | Same as bundleSavings |
+| `episodeCount` | Total episodes |
+| `advisoryRating` | Content rating (e.g. TV-14) |
+| `summary` | Full synopsis |
+| `seasonFamily` | Array of child seasons, each with `idInStore`, `title`, `priceSd`, `priceHd`, `priceSdEvolution`, `priceHdEvolution`, `cheapChartsProductPageUrl` |
+| `productPageUrl` | Direct Apple TV / iTunes store URL |
+| `iTunesUrl` | iTunes URL |
+| `imageSmallUrl` / `imageMediumUrl` / `imageLargeUrl` | Cover art URLs |
+| `appleTvId` | Apple TV internal ID |
+
+**Parsing `priceHdEvolution` (low priority - prefer `priceHdIsLowest`):** Split on `~`, each segment is `YYYY-MM-DD:[+/-]price`. The last segment (rightmost) is the earliest historical price; the first segment is the most recent price change. Example:
+
+```
+2026-05-20:+89.99~2026-05-12:-69.99~2026-04-01:-49.99~2022-02-09:89.99
+```
+
+**Caveat:** the delta convention is inconsistent across titles - for some, the last segment is an absolute starting price (`2022-02-09:89.99` with no sign); for others, the deltas don't accumulate cleanly to the current price. Empirically, walking deltas from the oldest segment does NOT always reproduce `priceHd`/`priceSd`. **For ATL detection, use the `priceHdIsLowest` / `priceSdIsLowest` flags instead - they are authoritative.** Only fall back to parsing `priceHdEvolution` if you need the absolute dollar amount of the historical low or the date it occurred, and validate the result against `priceHd` before trusting it.
+
+## Enum Values
+
+### Store
+
+| Value | Countries Supported |
+|---|---|
+| `itunes` | us, de, gb, fr, au, ca, at, ch, es, pt, ru, jp, tr, pl, in, cn |
+| `amazon` | us, de |
+| `vudu` | us |
+| `googlePlay` | us |
+
+**Default to `itunes`** if user doesn't specify a store - it has the broadest country support.
+
+### ItemType
+
+| Value | Meaning |
+|---|---|
+| `buymovies` | Movies (purchase prices) |
+| `seasons` | TV show seasons |
+| `all` | Search only - returns all media types (movies, seasons, ebooks, audiobooks, albums) |
+
+### Genre
+
+**Movies (`itemType=buymovies`)** - these values actually filter (tested 2026-06-21):
+
+`All` (no filter), `ActionAdventure`, `Comedy`, `Docus` (iTunes only), `Drama`, `MadeForTV`, `Horror`, `Classical`, `Romance`, `Independent`, `KidsFamily`, `MusicDocumentation`, `SciFiFantasy`, `Sport`, `Thriller`, `Western`, `Anime`, `Musicals`
+
+Unknown values silently fall back to "All" - they do NOT error (Pitfall #22).
+
+**TV Seasons (`itemType=seasons`)** - the `genre` parameter is broken on Deals, Charts, and Recommendations (Pitfall #21). Omit it and filter by title client-side.
+
+### Quality
+
+| Value | Meaning |
+|---|---|
+| `hd4k` | HD and 4K (default) |
+| `hd` | HD only |
+| `sd` | SD only |
+| `4k` | 4K only |
+| `sdOnly` | SD only (strict) |
+
+## Common Item Fields
+
+| Field | Always Present | Description |
+|---|---|---|
+| `title` | yes | Movie or TV season title |
+| `artist` | yes | Director (movies) or creator (TV) - may be empty string |
+| `cheapChartsProductPageUrl` | yes | Direct link to CheapCharts page - **always include this when showing results** |
+| `currency` | yes | Currency code (USD, EUR, etc.) |
+| `price` | yes | Current purchase price |
+| `priceBefore` | no | Previous price before last change |
+| `releaseDate` | yes | Original release date |
+| `genre` | yes | Primary genre name (human-readable, e.g. "Action & Adventure") |
+| `imdbId` | no | IMDb identifier (e.g. `tt0468569`) |
+| `imdbRating` | no | IMDb rating 0-10 |
+| `rottenTomatoesRating` | no | Rotten Tomatoes score 0-100 |
+| `has4K` | no | iTunes only - may be boolean or 1/0 |
+| `hasAtmos` | no | iTunes only - Dolby Atmos available |
+| `hdrFormat` | no | iTunes only - `No HDR`, `Dolby Vision`, `HDR10+`, `HDR10` |
+| `isMovieBundle` | no | iTunes only - is this a movie bundle/collection |
+| `description` | no | Short synopsis (if available) |
+| `rank` | no | Chart rank position (Charts endpoint only) |
+| `mediaType` | Search only | movies, seasons, ebooks, audiobooks, albums |
+| `priceFollowUpItemType` | Search only | Use this as `itemType` for Prices API follow-up |
+
+## Workflow Recipes
+
+### Recipe: "Find deals on 4K action movies under $5"
+
+```bash
+curl -s "https://buster.cheapcharts.de/v1/gptapi/Deals.php?action=getDeals&store=itunes&country=us&itemType=buymovies&genre=ActionAdventure&quality=hd4k&sort=greatestSavings&maxPrice=4.99&limit=20"
+```
+
+### Recipe: "Highly-rated deals under $X" (IMDb + maxPrice both filter server-side)
+
+```bash
+curl -s "https://buster.cheapcharts.de/v1/gptapi/Deals.php?action=getDeals&store=itunes&country=us&itemType=buymovies&genre=All&imdbRating=7&rottenTomatoesRating=80&maxPrice=9.99&sort=greatestSavings&limit=20"
+```
+
+### Recipe: "4K Dolby Vision + Atmos movies on sale" (filter client-side - see Pitfall #16)
+
+```bash
+curl -s "https://buster.cheapcharts.de/v1/gptapi/Deals.php?action=getDeals&store=itunes&country=us&itemType=buymovies&genre=All&sort=greatestSavings&limit=50" | python -c "
+import sys, json
+items = json.load(sys.stdin)['results']['buymovies']
+premium = [i for i in items if i.get('has4K') in (1, True) and i.get('hasAtmos') in (1, True) and i.get('hdrFormat') == 'Dolby Vision']
+for i in premium[:15]:
+    was = i.get('priceBefore','?')
+    sav = f\"\${float(was)-float(i['price']):.2f}\" if was != '?' else '?'
+    print(f\"{i['title']} | \${i['price']} (was \${was}, save {sav}) | {i['genre']} | IMDb {i.get('imdbRating','?')}\")"
+```
+
+### Recipe: "Search a specific title, then compare prices across all 4 stores"
+
+```bash
+# Step 1 - find IMDb ID
+imdb=$(curl -s "https://buster.cheapcharts.de/v1/gptapi/Search.php?action=search&store=itunes&country=us&itemType=all&query=The%20Dark%20Knight&limit=1" \
+  | python -c "import sys,json; print(json.load(sys.stdin)['results'][0].get('imdbId',''))")
+echo "IMDb: $imdb"
+
+# Step 2 - query each store in parallel (only iTunes reliably supports prices; others via Topseller)
+for store in itunes amazon vudu googlePlay; do
+  echo "=== $store ==="
+  curl -s "https://buster.cheapcharts.de/v1/gptapi/Prices.php?action=getPrices&store=$store&country=us&itemType=buymovies&imdbIDs=$imdb" \
+    | python -c "
+import sys, json
+r = json.load(sys.stdin)
+if r.get('status') != 'success':
+    print(f\"  not available: {r.get('message','unknown error')}\")
+else:
+    for i in r.get('results',{}).get('buymovies',[]):
+        print(f\"  \${i.get('price')} (was \${i.get('priceBefore','?')})\")"
+done
+```
+
+### Recipe: "Complete TV series on sale" (filter to bundle deals, avoid per-season noise)
+
+```bash
+curl -s "https://buster.cheapcharts.de/v1/gptapi/Deals.php?action=getDeals&store=itunes&country=us&itemType=seasons&genre=All&sort=greatestSavings&limit=50" | python -c "
+import sys, json
+items = json.load(sys.stdin)['results']['seasons']
+bundles = [i for i in items if i.get('isBundle') == 1]
+for i in bundles[:10]:
+    was = i.get('priceBefore','?')
+    sav = f\"\${float(was)-float(i['price']):.2f}\" if was != '?' else '?'
+    print(f\"{i['title']} | \${i['price']} was \${was} save {sav} | {i['genre']}\")"
+```
+
+### Recipe: "Cross-store top sellers today"
+
+```bash
+curl -s "https://buster.cheapcharts.de/v1/gptapi/Topseller.php?action=getTopsellerForStartpage&country=us&store=itunes,amazon,vudu,googlePlay&maxItemCount=5" | python -c "
+import sys, json
+r = json.load(sys.stdin)
+if r.get('status') != 'success': sys.exit(r.get('message'))
+for store, cats in r['results'].items():
+    for cat, items in cats.items():
+        print(f'=== {store} - {cat} ===')
+        for i in items[:5]:
+            was = i.get('priceBefore')
+            drop = f\" (was \${was})\" if was else ''
+            print(f\"  {i['title']} | \${i['price']}{drop} | {i.get('genre','?')}\")"
+```
+
+### Recipe: "What's the price of [specific movie]?"
+
+Step 1 - Search to get IMDb ID:
+```bash
+curl -s "https://buster.cheapcharts.de/v1/gptapi/Search.php?action=search&store=itunes&country=us&itemType=all&query=The%20Dark%20Knight&limit=3"
+```
+
+Step 2 - Prices using IMDb ID from search results:
+```bash
+curl -s "https://buster.cheapcharts.de/v1/gptapi/Prices.php?action=getPrices&store=itunes&country=us&itemType=buymovies&imdbIDs=tt0468569"
+```
+
+### Recipe: "Today's price drops on Apple TV/iTunes" (DEFAULT for "latest deals")
+
+**When user asks "what's the latest on cheapcharts", "latest Apple TV deals", "today's price drops", or any "what just changed" question, use this workflow.** Steps:
+
+1. Pull Deals with `sort=latestPricechange` (default sort order is most recent change first).
+2. For each item, hit DetailData to get the actual `priceHdLastChangeDate` (or `priceSdLastChangeDate`).
+3. Filter to items where the change date matches today. Report those as today's drops; fall back to "last 3 days" if nothing changed today.
+
+```bash
+# Step 1 - pull the freshest drops (movies + seasons)
+curl -s "https://buster.cheapcharts.de/v1/gptapi/Deals.php?action=getDeals&store=itunes&country=us&itemType=buymovies&genre=All&sort=latestPricechange&limit=80"
+curl -s "https://buster.cheapcharts.de/v1/gptapi/Deals.php?action=getDeals&store=itunes&country=us&itemType=seasons&genre=All&sort=latestPricechange&limit=80"
+
+# Step 2 - extract idInStore from cheapChartsProductPageUrl, then verify change date
+# CRITICAL: DetailData itemType is "movies" or "seasons", NOT "buymovies" (Pitfall #13)
+curl -s "https://buster.cheapcharts.de/v1/DetailData.php?store=itunes&country=us&itemType=movies&idInStore=1815368549" | python -c "
+import sys, json
+m = json.load(sys.stdin)['results']['movies']
+print(f\"changeDate: {m.get('priceHdLastChangeDate') or m.get('priceSdLastChangeDate')}\")
+print(f\"price: \${m.get('priceHd') or m.get('priceSd')}\")
+print(f\"was: \${m.get('priceHdBefore') or m.get('priceSdBefore')}\")
+print(f\"evolution: {m.get('priceHdEvolution','')[:120]}\")"
+```
+
+**Note:** CheapCharts data lags Apple's store by hours-to-a-day. If `latestPricechange` returns items but none have today's `priceHdLastChangeDate`, that's a real "no drops today yet" - not a bug. Show the last 3 days of changes as a fallback and note the lag.
+
+**Architecture note - why this recipe makes N+1 calls:** DetailData is the ONLY endpoint that exposes the `priceHdIsLowest` / `priceSdIsLowest` flags (verified 2026-06-23: Deals.php returns 14 fields with no ATL data, Search.php returns 10 metadata fields, Prices.php with multiple imdbIDs works but returns the same 15 fields as Deals - none of them ATL-related). There is no batch DetailData endpoint - tested with `idInStore=A&idInStore=B`, `idInStore=A,B`, `ids=A,B`, `idInStores=A,B`: all variants return empty `{}`. So populating the ATL column requires 1 Deals call + 1 DetailData per item.
+
+**Use the bundled script** `scripts/atl_check.py` (parallel `ThreadPoolExecutor` with 8 workers) to make the N DetailData calls concurrent - empirically ~12s for 50 items vs ~150s for the inline sequential recipe below. The script also supports single-title lookup via `--title`, min-savings filtering, and JSON output.
+
+### Recipe: "All-time low (ATL) deals"
+
+**When user asks "is [title] at its lowest ever?" / "what's at ATL right now?" / "deals at the lowest price ever" - use this workflow.** DetailData exposes a built-in `priceHdIsLowest` / `priceSdIsLowest` flag. `1` means the current price equals the all-time low across CheapCharts' tracked price history for that title.
+
+**Recommended: run the bundled parallel script** (preferred over the inline recipes below - much faster):
+
+```bash
+# Batch ATL filter - finds every current deal at all-time low, parallelized
+python scripts/atl_check.py --type buymovies --limit 60 --min-savings 5
+
+# Check TV seasons instead of movies
+python scripts/atl_check.py --type seasons --limit 30
+
+# Single title lookup
+python scripts/atl_check.py --title "Fight Club"
+
+# JSON output for piping into other tools
+python scripts/atl_check.py --json --limit 30
+```
+
+**For a runnable script** that does batch ATL filtering or single-title ATL lookup with proper exit codes, see `scripts/atl_check.py` (supports `--title`, `--type buymovies|seasons`, `--limit`, `--min-savings`, `--json`). This is the recommended path for cron jobs and one-off lookups - invoke with `python scripts/atl_check.py` (or the absolute path from your environment). The script is `currently at ATL` only - it does NOT filter by `priceHdLastChangeDate`; for date-bounded checks (e.g. "hit ATL in the last 24 hours") use the inline workflow in the Cron section.
+
+### Recipe: "Latest new-release movies on sale"
+
+```bash
+curl -s "https://buster.cheapcharts.de/v1/gptapi/Deals.php?action=getDeals&store=itunes&country=us&itemType=buymovies&genre=All&sort=releaseDate&limit=500" | python -c "
+import sys, json
+items = json.load(sys.stdin)['results']['buymovies']
+real = [i for i in items if not i.get('releaseDate','').startswith('2030')]
+real.sort(key=lambda x: x.get('releaseDate',''), reverse=True)
+for i in real[:10]:
+    print(f\"{i['title']} | {i['releaseDate']} | \${i['price']} (was \${i.get('priceBefore','?')})\")"
+```
+
+### Recipe: "Movies released this year that are on sale"
+
+```bash
+curl -s "https://buster.cheapcharts.de/v1/gptapi/Deals.php?action=getDeals&store=itunes&country=us&itemType=buymovies&genre=All&releaseYear=2026-2026&sort=latestPricechange&limit=20"
+```
+
+### Recipe: "TV season releases from a specific year range"
+
+```bash
+curl -s "https://buster.cheapcharts.de/v1/gptapi/Deals.php?action=getDeals&store=itunes&country=us&itemType=seasons&genre=All&releaseYear=2024-2026&sort=releaseDate&limit=50"
+```
+
+### Recipe: "Charts for new releases only"
+
+```bash
+curl -s "https://buster.cheapcharts.de/v1/gptapi/Charts.php?action=getCharts&store=itunes&country=us&itemType=buymovies&genre=All&quality=hd4k&releaseYear=2026-2026&limit=20"
+```
+
+### Recipe: "Best sci-fi recommendations on Amazon with IMDb 7+"
+
+```bash
+curl -s "https://buster.cheapcharts.de/v1/gptapi/Recommendations.php?action=getRecommendations&store=amazon&country=us&itemType=buymovies&genre=SciFiFantasy&quality=hd4k&limit=15&imdbRating=7"
+```
+
+### Recipe: "What's trending across all stores?"
+
+```bash
+curl -s "https://buster.cheapcharts.de/v1/gptapi/Topseller.php?action=getTopsellerForStartpage&country=us&store=itunes,amazon,vudu,googlePlay&maxItemCount=5"
+```
+
+### Recipe: "Highly-rated horror movies on sale"
+
+```bash
+curl -s "https://buster.cheapcharts.de/v1/gptapi/Deals.php?action=getDeals&store=itunes&country=us&itemType=buymovies&genre=Horror&sort=greatestSavings&imdbRating=7&limit=20"
+```
+
+## Gift Card Stacking Strategy
+
+CheapCharts tracks Apple gift card discounts at **https://www.cheapcharts.com/us/gift-card-deals** - retailers like Target, Best Buy, PayPal, Amazon, and Costco regularly sell $100 Apple gift cards for $80-$90 (10-25% off).
+
+**Compound savings:** Buy a discounted Apple gift card -> use it to purchase an already-discounted movie on iTunes/Apple TV. A $4.99 movie bought with a 20%-off gift card effectively costs **$3.99**.
+
+**Known patterns (from CheapCharts gift card deal history):**
+
+| Retailer | Typical Deal | Stacking Tip |
+|---|---|---|
+| Target | $10-$15 bonus GC with $100 Apple GC | Use Target Circle Card for extra 5% off |
+| Best Buy | $10-$15 bonus GC with $100 Apple GC | Stack with PayPal 5% off Best Buy |
+| Amazon | $15 credit with $100 Apple GC | Use promo codes (e.g. `APPLEBF`, `APPLEGIFT`) |
+| Costco | 10-20% off Apple GC (members only) | Check Costco warehouse + online |
+
+These promotions rotate every few months, peaking around Black Friday and holidays. **Always check the gift card deals page before recommending a purchase** - if an active gift card deal exists, mention it as a way to stack savings.
+
+## Movies Anywhere Compatibility
+
+Many digital movie purchases on iTunes/Apple TV, Amazon, Vudu, and Google Play are **Movies Anywhere (MA) compatible**. MA-compatible titles sync across all four stores - buy on iTunes, watch on Vudu/Amazon/Google Play and vice versa.
+
+**Important:** CheapCharts does NOT expose MA compatibility in any endpoint. There is no `isMoviesAnywhere` field, no MA filter, and no MA endpoint. The Movies Anywhere website itself does not have a stable public API (returns JS-rendered HTML only - no JSON-LD).
+
+**Detection strategy (programmatic):** Use a studio-based heuristic. MA compatibility is determined by studio participation in the Movies Anywhere consortium:
+
+| MA-Compatible Studios | NOT MA-Compatible (major) |
+|---|---|
+| Walt Disney Studios (Disney, Pixar, Marvel, Lucasfilm, 20th Century Studios, Searchlight) | Paramount (incl. Republic, Miramax) |
+| Warner Bros. (New Line, Castle Rock, HBO theatrical) | MGM |
+| Universal (DreamWorks, Focus, Illumination) | Lionsgate (incl. Summit, Starz) |
+| Sony Pictures (Columbia, TriStar, Screen Gems, AFFIRM, Crunchyroll theat.) | The Weinstein Company (defunct) |
+| 20th Century Studios (now under Disney but historically Fox) | Some A24 titles (varies) |
+
+**Recipe: Look up a title's studio via IMDb**
+
+```bash
+# CheapCharts gives you imdbId. Fetch studio via IMDb's public page or a movie DB API.
+curl -s "https://www.imdb.com/title/tt0468569/" -A "Mozilla/5.0" \
+  | grep -oE '(Warner Bros|Universal|Sony|Disney|Paramount|MGM|Lionsgate)[^<]*' \
+  | head -1
+```
+
+**Implications for cross-store comparison:**
+- For MA-compatible titles, the cheapest store wins regardless of where the user watches
+- For NOT MA-compatible titles, the user should buy from the store they actually wants to watch on
+- For unknown studios, suggest verifying at moviesanywhere.com or the Movies Anywhere app
+
+## Seasonal Sales Calendar (iTunes / Apple TV)
+
+iTunes/Apple TV deals follow predictable annual patterns. Use this to set expectations and proactively suggest checking deals during these windows:
+
+| Period | Sale Type | Typical Discount |
+|---|---|---|
+| Jan-Feb | Oscar season | Best Picture contenders 30-50% off |
+| Mar-Apr | Spring sale | Wide catalog discounts, often $4.99 |
+| May-Jul | Summer blockbuster sales | Tied to theatrical releases |
+| Oct | Horror month | *Get Out*, *Hereditary*, etc. at $3.99-$4.99 |
+| Nov-Dec | Black Friday -> New Year | Biggest window: $0.99 rentals, $4.99 purchases |
+| Tuesdays | Weekly spotlight deals | 8-30+ titles drop, $0.99 rentals to $4.99 buys |
+
+**Studio promotions** (Warner Bros., Universal, Disney) run independently of seasonal sales - flash drops with no announcement, lasting 24-72 hours.
+
+## Cron / Monitoring Recipe
+
+For automated deal monitoring, set up a Hermes cron job that checks the Deals API daily and alerts on real price drops. Use the new "latest price change" workflow (sort=latestPricechange + DetailData verification) rather than `greatestSavings` - the latter is dominated by fake drops and bundles with manipulated baselines.
+
+```
+Schedule: daily at 9am (0 9 * * *)
+Prompt: |
+  Query the CheapCharts Deals API for iTunes US movies sorted by latestPricechange.
+  Pull the top 30 items. For each, call DetailData (itemType=movies) to get priceHdLastChangeDate.
+  Filter to items where priceHdLastChangeDate == today AND priceBefore - price > $3 (skip fake drops).
+  Report the top 5 deals with title, price, priceBefore, savings %, IMDb rating, and the cheapChartsProductPageUrl.
+  If fewer than 3 items changed today, fall back to the last 3 days of changes.
+  If no items meet the threshold, stay silent.
+  Use curl:
+    https://buster.cheapcharts.de/v1/gptapi/Deals.php?action=getDeals&store=itunes&country=us&itemType=buymovies&sort=latestPricechange&limit=30
+    https://buster.cheapcharts.de/v1/DetailData.php?store=itunes&country=us&itemType=movies&idInStore=<idInStore>
+```
+
+**For "currently at ATL" monitoring** (titles that are at their all-time low right now, regardless of when they got there), use the bundled script:
+
+```
+Schedule: daily at 9am (0 9 * * *)
+Prompt: |
+  Run: python scripts/atl_check.py --type buymovies --min-savings 5
+  Report the top 5 ATL titles with title, current price, prior price, savings $, savings %, IMDb rating, and cheapChartsProductPageUrl.
+  If no titles meet the threshold, stay silent.
+  The script does parallel DetailData fetches via ThreadPoolExecutor (~12s for 50 items).
+```
+
+**For "just hit ATL" monitoring** (titles that REACHED their all-time low in the last 24 hours specifically), the script does NOT have a `--changed-since` filter - use the inline workflow with the date check:
+
+```
+Schedule: daily at 9am (0 9 * * *)
+Prompt: |
+  Query CheapCharts Deals for iTunes US movies sorted by latestPricechange, limit 50.
+  For each, hit DetailData (itemType=movies) and check BOTH priceHdLastChangeDate == today
+  AND priceHdIsLowest == 1 (or priceSdIsLowest == 1).
+  Report the top 5 titles that hit ATL today, with title, current price, prior price (priceHdBefore),
+  savings $, savings %, IMDb rating, and cheapChartsProductPageUrl.
+  If no titles hit ATL today, stay silent.
+  This uses the IsLowest flag exposed by DetailData - no need to parse priceHdEvolution.
+```
+
+## Support Files
+
+- `scripts/atl_check.py` - runnable Python script for batch ATL filtering (`--type`, `--limit`, `--min-savings`, `--json`) and single-title ATL lookup (`--title`). Uses parallel DetailData fetches. Suitable for cron jobs and one-off checks.
+
+## Related Resources
+
+- **CheapCharts Games** (sister product): Tracks video game prices across Xbox, PlayStation, Nintendo Switch, and Steam at **games.cheapcharts.info**. Separate apps (iOS/Android), separate tracking. No public API documented - point users to the website if they ask about game deals.
+- **Mobile apps:** CheapCharts Movie & TV Deals (iOS: id772046134, Android: com.lollipapp.cc), CheapCharts Games (iOS: id1622193150, Android: com.cheapcharts.cheapcharts_games)
+- **JSON-LD hints:** Key CheapCharts website pages expose JSON-LD `potentialAction` hints that link directly to the GPT API endpoints with pre-filled parameters. Use as a browser-based fallback if the API doesn't cover a specific query.
+- **Apple TV app gap:** The Apple TV app uses a different catalog index than iTunes. Many deals (boxsets, complete series bundles, older catalog titles) appear on CheapCharts/iTunes but are invisible in the Apple TV app. If a user can't find a deal in Apple TV, direct them to the iTunes purchase link (`productPageUrl` or `iTunesUrl` from DetailData).
+
+## Presentation Guidelines
+
+1. **Always include `cheapChartsProductPageUrl`** when showing results to users - they can click through for full price history and details.
+2. **Show savings** - calculate `priceBefore - price` and percentage off when `priceBefore` is present.
+3. **Highlight 4K/Atmos/HDR** info for iTunes items when relevant.
+4. **Show ratings** - IMDb and Rotten Tomatoes scores help users decide.
+5. **Filter noise** - Search with `itemType=all` returns ebooks, audiobooks, albums. Filter to `mediaType == "movies"` or `mediaType == "seasons"` unless user explicitly wants other media.
+6. **Multi-store comparison** - use Topseller or call Prices with different `store` values to compare the same title across stores. Note Movies Anywhere compatibility (see dedicated section) - for MA-compatible titles, cheapest store wins regardless of where the user watches.
+
+7. **Mention gift card stacking** - when recommending an iTunes/Apple TV purchase, check if there's an active Apple gift card deal at `https://www.cheapcharts.com/us/gift-card-deals`. If so, mention the compound savings opportunity (discounted gift card + discounted movie).
+
+8. **Note seasonal context** - if the current date falls within a known sale window (see Seasonal Sales Calendar), proactively mention it (e.g., "We're in Oscar season - Best Picture contenders typically drop 30-50% off right now").
+
+9. **Always include an `ATL` column in deal tables** when the data has been enriched with DetailData. `ATL` is the standard shorthand for "all-time low" - derived from `priceHdIsLowest` / `priceSdIsLowest`. This tells the user whether the current price equals the historical floor or just a typical sale. Use one of:
+   - `ATL` - current price equals the all-time low (best possible time to buy)
+   - `-` (plain hyphen) - current price is on sale but not at the historical floor
+   - omit the column entirely only if the data wasn't enriched with DetailData
+
+   **Standard deal-report table template (when DetailData has been hit):**
+
+   | Title | Genre | Now | Was | Save | IMDb | ATL | Changed |
+   |---|---|---:|---:|---:|---:|:-:|---|
+   | [Title](cheapChartsProductPageUrl) | Genre | $X.XX | $Y.YY | $Z.ZZ (N%) | N.N | ATL | YYYY-MM-DD |
+
+   For multi-store comparisons, add a `Store` column between Title and Now. For seasonal/limited drops where change date is the same day for every row, drop the `Changed` column to save width on Telegram.
+
+   When a row's `ATL` cell is `ATL`, consider prefixing the row with `**` (bold) in your message body - Telegram renders this and it visually flags the rare "lowest ever" deals among typical sales.
+
+## Common Pitfalls
+
+1. **Using wrong `itemType` for Prices.** Prices requires `buymovies` (not `movies`). Search returns `priceFollowUpItemType` - use that value for the Prices follow-up call.
+
+2. **Forgetting to URL-encode the query.** Use `%20` for spaces in `query` parameter, not literal spaces.
+
+3. **Expecting all fields on all stores.** `has4K`, `hasAtmos`, `hdrFormat`, `isMovieBundle` are iTunes-only. Amazon/Vudu/Google Play items won't have these fields.
+
+4. **Search returns mixed media types.** `itemType=all` returns movies, seasons, ebooks, audiobooks, and albums. Filter by `mediaType` in your processing if the user only wants movies/TV.
+
+5. **Topseller `has4K` is numeric.** Topseller may return `1`/`0` instead of `true`/`false` for `has4K`/`hasAtmos`. Handle both.
+
+6. **`artist` may be empty string.** Not all stores provide director/creator names. Don't rely on it being populated.
+
+7. **Seasons/bundles lack IMDb IDs - Prices API explicitly rejects seasons.** The Prices endpoint returns an error: "Prices API supports ONLY movies (buymovies), not seasons." The Search endpoint returns `idInStore` but no price for seasons. **Solution: use the internal `DetailData.php` endpoint** (see Endpoint #7 above) with the `idInStore` from Search results. This returns current prices, full price history, and child seasons - all via curl, no browser needed. Workflow: Search (get idInStore) -> DetailData (get prices + history).
+
+8. **Bundle vs individual season pricing.** When a user asks about a "complete series" bundle, always check the individual season prices too. Seasons go on sale independently, and buying them individually can be cheaper than the bundle (even when the bundle claims to save money vs regular individual prices). The product page shows "Other Seasons" with current sale prices for each season.
+
+9. **Fake drops / manipulated `priceBefore`.** Some deals show a large `priceBefore -> price` drop that isn't real. Detect fake drops by: (a) checking if `priceBefore` equals `price` (no actual change - just the field is populated), (b) using DetailData's `priceHdEvolution` / `priceSdEvolution` to verify a genuine historical price change occurred, (c) filtering to `priceBefore > price` strictly (some items appear in Deals with no actual discount). When reporting deals, always calculate actual savings (`priceBefore - price`) and skip items where savings <= $0. If `priceBefore` looks suspiciously high compared to the price evolution history, flag it as a potentially inflated baseline.
+
+10. **Amazon/Vudu/Google Play Deals endpoint instability.** The Deals endpoint for non-iTunes stores has been observed returning HTTP 500 errors server-side (noted June 2026). If Deals fails for a non-iTunes store, fall back to Topseller for that store, or retry later. iTunes Deals is the most reliable endpoint.
+
+11. **`sort=releaseDate` is ASCENDING only - no descending variant.** The API accepts `releaseDate` (oldest first) but rejects `releaseDate_desc`, `newest`, `dateAdded`, `releaseDate_asc`, and every other date-sort variant tested (returns empty results). To get newest-first order, request with `sort=releaseDate&limit=500` and reverse client-side (Python/JS), OR narrow with `releaseYear=YYYY-YYYY` first and then pick what you need from the smaller result set.
+
+12. **Bundle placeholder dates pollute `releaseDate` sort.** Many movie bundles have `releaseDate=2030-12-31` or `2026-12-31` - obvious placeholder values, not real release dates. They cluster at the top of `releaseDate` ascending results and look like "the newest" if you don't filter. Strip them client-side (e.g. `if not releaseDate.startswith('2030')`) before reporting "newest releases." Single-movie titles almost always have real dates; the issue is specifically with multi-film bundles.
+
+13. **DetailData `itemType` is `movies` or `seasons` - NOT `buymovies`.** The Deals endpoint uses `itemType=buymovies` for movies, but DetailData uses a DIFFERENT vocabulary. Valid DetailData itemType values are: `singles, albums, movies, seasons, audiobooks, ebooks, apps, macapps, games`. Passing `itemType=buymovies` to DetailData returns an error: `Expected value for <itemType> not set or invalid`. This silently fails in scripts that don't check the `status` field, making it look like there's no price-change data when there actually is. **Always use `movies` for movies and `seasons` for TV when calling DetailData.**
+
+14. **CheapCharts data lags Apple's store.** Apple's price changes can take hours to a full day to propagate to the CheapCharts API. If `sort=latestPricechange` returns items but none have a `priceHdLastChangeDate` matching today, that is a legitimate "no drops detected today yet" - re-query in a few hours. Don't treat an empty today-list as a bug.
+
+15. **Always check `response.status` before iterating results.** Every endpoint returns `{"status":"success", ...}` on success or `{"status":"error", "message":"..."}` on failure. If you iterate `results` without checking status, a 400 error with empty `results: {}` silently yields no data - which looks identical to "no deals found." This is how the 2026-06-21 "no drops today" bug happened: passing `itemType=buymovies` to DetailData returned a status=error, the script iterated an empty dict, and reported "nothing today" when The Harvest had actually just dropped. **Pattern: `if response.get('status') != 'success': print(response.get('message')); return`.**
+
+16. **`has4K=1` filter does NOT work on Deals/Charts.** Tested with iTunes US: passing `has4K=1` returns the same items with `has4K=0` in the response - the parameter is silently ignored. To filter to 4K-only deals, filter client-side after the API call (`if item.get('has4K') in (1, True): ...`). The field exists in item data (as `has4K`, `hasAtmos`, `hdrFormat`) but is not honored as a query parameter.
+
+17. **DetailData is unofficial.** Only Search, Charts, Deals, Prices, Recommendations, and Topseller are in the official gptapi docs. DetailData.php was discovered by inspecting CheapCharts' website network calls and is not promised to stay stable. If it starts returning errors, fall back to Prices (movies only) or just present the current Deals data without history verification.
+
+18. **`Recommendations.php` may return chart data when no genre filter is set.** Tested: calling Recommendations with `genre=All` returns items with `rank` fields and matches the Charts endpoint output. The underlying API uses `OfferList.php?listType=charts`. If you want curated recommendations rather than just top-of-charts, pass a specific `genre` (e.g. `SciFiFantasy`) and an `imdbRating` filter.
+
+19. **Apple TV / iTunes terminology.** Official CheapCharts docs confirm: "iTunes" and "Apple TV" are used interchangeably. When the user says "Apple TV deal" or "iTunes deal" or "buy on Apple", treat them all as `store=itunes`. Apple rebranded iTunes Movies & TV Shows to the Apple TV app in 2019; the underlying purchase catalog is the same.
+
+20. **JSON-LD fallback for unsupported queries.** Key CheapCharts website pages (search results, deal list pages, movie detail pages) embed JSON-LD `potentialAction` hints that link directly to the GPT API endpoints with pre-filled parameters. If a user asks for something the API doesn't support directly (e.g., browsing a specific store page), browse the relevant cheapcharts.com page and parse the JSON-LD to discover the right API call.
+
+21. **`genre` filter is broken for `seasons` on Deals, Charts, AND Recommendations.** Tested 2026-06-21: every `genre` value (`Drama`, `Comedy`, `Horror`, `ActionAdventure`, `KidsFamily`, `Anime`, `MadeForTV`, etc.) returns the exact same list of items - the parameter is silently ignored. The default sort/limit just returns the top of the unfiltered deals list. **For TV series filtering, omit the `genre` parameter entirely and filter by series name client-side (e.g., `if 'archie' in item['title'].lower()`).** Only `itemType=buymovies` honors the genre filter reliably.
+
+22. **`genre` filter silently falls back to "All" for unknown values on `buymovies`.** Tested 2026-06-21: passing `genre=Latino`, `genre=Faith`, `genre=War`, `genre=asdfgarbage123`, etc. all return the same unfiltered deals list as `genre=All`. The API does NOT error - it just gives you everything. **If you pass a non-standard genre and get a large mixed-genre result set, that's a signal your genre value isn't recognized.** Stick to the documented Genre enum below.
+
+23. **`imdbRating` and `rottenTomatoesRating` filters work on Deals/Charts but NOT on Recommendations.** Tested 2026-06-21: on `Deals?itemType=buymovies&imdbRating=8`, returned items with min rating 8.0 (works). On `Recommendations?itemType=buymovies&genre=Drama&imdbRating=8`, returned items with ratings 6.8, 7.3, 7.5 - the filter was silently ignored. **For rating-filtered recommendations, use Deals with `sort=greatestSavings` and the rating filter, NOT Recommendations.**
+
+24. **Movies Anywhere compatibility is NOT exposed by any CheapCharts endpoint.** Tested 2026-06-21: no `isMoviesAnywhere` field exists in any of Search, Deals, Charts, Prices, Recommendations, Topseller, or DetailData responses. The Movies Anywhere website has no stable public API (returns JS-rendered HTML, no JSON-LD). Use the studio-based heuristic in the Movies Anywhere Compatibility section, or browse the MA website for definitive verification.
+
+25. **`releaseYear` works on Charts for both buymovies and seasons.** Tested: `Charts?itemType=seasons&releaseYear=2025-2026` correctly returns seasons with release dates in that range. Confirms releaseYear is supported on Deals and Charts (already documented) but worth restating since the seasons endpoint's other filters are broken (Pitfall #21).
+
+26. **`priceHdEvolution` / `priceSdEvolution` deltas do NOT reliably reconstruct absolute price history.** The evolution string is documented as "date:[+/-]price" with the rightmost segment as the starting absolute price and earlier segments as deltas. Empirically (tested 2026-06-23): walking the deltas from the rightmost segment frequently produces a final price that does NOT match `priceHd` / `priceSd`. For example, Bernie (iTunes id 1875049429) has `priceHdEvolution=2026-06-23:-4.99~...~2026-02-17:12.99` and current `priceHd=4.99`, but summing the deltas from $12.99 forward gives $27.00 - not $4.99. The delta magnitudes/signs appear to be inconsistent across titles. **For ATL detection, always use `priceHdIsLowest` / `priceSdIsLowest` flags (authoritative).** Only fall back to parsing the evolution string if you also need the dollar amount or date of the historical low, and validate your reconstructed final price against `priceHd` / `priceSd` before reporting it. The previous SKILL example interpreting the evolution string as cumulative deltas is misleading - see the updated "Parsing priceHdEvolution" section.
+
+27. **`priceHdIsLowest` / `priceSdIsLowest` is the canonical ATL flag - different from `priceHdIsBest` / `priceSdIsBest`.** `IsLowest=1` means current price equals the all-time low across CheapCharts' tracked history. `IsBest=1` means current price is the floor of the CURRENT sale window - a previous sale may have gone lower (`IsLowest=0, IsBest=1` is common). Check `IsLowest` for "lowest ever" questions; check `IsBest` for "is this a good price right now" questions.
+
+28. **There is no batch DetailData endpoint - N+1 calls is the only way to enrich a Deals list with ATL data.** Verified 2026-06-23: `DetailData.php` only accepts a single `idInStore` per call. Tested alternative param shapes (`idInStore=A&idInStore=B`, comma-separated `idInStore=A,B`, `ids=A,B`, `idInStores=A,B`) - all return empty `{}`. None of the public gptapi endpoints (Deals, Search, Prices, Charts, Recommendations, Topseller) expose the ATL flags. Use the bundled `scripts/atl_check.py` (parallel `ThreadPoolExecutor`, 8 workers) to make the N DetailData calls concurrent - empirically ~12s for 50 items vs ~150s for sequential.
+
+29. **Before adding a recipe to this skill, check `scripts/` for an existing tool that already does the workflow.** This skill ships with `scripts/atl_check.py` (parallel batch ATL checker with CLI flags, JSON output, proper exit codes). The skill's inline bash recipes for ATL filtering are 10-12x slower than the script (sequential DetailData calls vs parallel). Recipes should reference the script with a short invocation. When extending the skill: `ls scripts/` and `grep -n 'scripts/' SKILL.md` first, then add a one-line "run this script" recipe instead of inlining the workflow.
+
+## Verification Checklist
+
+- [ ] Correct endpoint selected for user intent (see Quick Decision Guide)
+- [ ] "Latest deals" / "today's drops" / "what just changed" defaults to Deals sort=latestPricechange + DetailData verification (NOT releaseDate sort)
+- [ ] `store` and `country` set appropriately (default: `itunes`, `us`)
+- [ ] `itemType` correct (`buymovies` for Deals/Charts, `movies` for DetailData, `seasons` for both, `all` for Search only)
+- [ ] Response `status` field checked as `"success"` before iterating `results` (Pitfall #15) - silent failures from wrong itemType or bad params look identical to empty result sets
+- [ ] Query parameters URL-encoded (spaces as `%20`)
+- [ ] `cheapChartsProductPageUrl` included in output shown to user
+- [ ] Results filtered to relevant `mediaType` if user only wants movies/TV
+- [ ] Fake drops filtered out (`priceBefore > price`, savings > $0)
+- [ ] Bundle placeholder dates filtered out when sorting by `releaseDate` (`releaseDate` not starting with `2030`)
+- [ ] For TV season queries: `genre` filter omitted (Pitfall #21) and filtered client-side by title/name
+- [ ] For rating-filtered queries: used Deals endpoint, NOT Recommendations (Pitfall #23)
+- [ ] Movies Anywhere compatibility noted in multi-store comparisons (using studio heuristic from Movies Anywhere Compatibility section, not assumed)
+- [ ] Seasonal context mentioned if current date falls in a known sale window
+- [ ] For ATL questions ("lowest ever", "all-time low"): used `priceHdIsLowest` / `priceSdIsLowest` from DetailData, NOT parsed `priceHdEvolution` (Pitfall #26)
+- [ ] For cron / monitoring jobs that need ATL alerts: consider running `python scripts/atl_check.py --json` and parsing the output, instead of inlining the DetailData workflow
+
+## Source
+
+- API docs: https://www.cheapcharts.com/us/ai (llms.txt)
+- Website: https://www.cheapcharts.com
+- The API is free, public, and specifically designed for AI agents. No auth headers needed.

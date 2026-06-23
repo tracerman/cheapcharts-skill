@@ -1,0 +1,30 @@
+name: Test atl_check.py
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  smoke-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Smoke test - script runs and exits 0 or 1
+        run: |
+          python scripts/atl_check.py --type buymovies --limit 5
+          # Script exits 0 on success, 1 on "no ATL titles found"
+          # Either is acceptable; just verify it parses args and runs.
+      - name: JSON output mode
+        run: |
+          python scripts/atl_check.py --type buymovies --limit 3 --json | python -c "import json, sys; data=json.load(sys.stdin); assert isinstance(data, list); print(f'OK: {len(data)} items')"
+      - name: Single title lookup
+        run: |
+          python scripts/atl_check.py --title "Bernie"
