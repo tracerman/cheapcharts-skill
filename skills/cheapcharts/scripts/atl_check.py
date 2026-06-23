@@ -206,6 +206,11 @@ def main():
     try:
         if args.title:
             return check_single_title(args.title, args.store, args.country)
+        if args.store == "games":
+            print("  CheapCharts Games has no public API (verified 2026-06-23).", file=sys.stderr)
+            print("  For current game deals, see: https://games.cheapcharts.info", file=sys.stderr)
+            print("  Or use the CheapCharts Games mobile apps (iOS: id1622193150, Android: com.cheapcharts.cheapcharts_games).", file=sys.stderr)
+            return 2
         return check_batch(
             item_type=args.type,
             store=args.store,

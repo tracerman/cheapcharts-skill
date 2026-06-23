@@ -433,7 +433,21 @@ Prompt: |
 
 ## Related Resources
 
-- **CheapCharts Games** (sister product): Tracks video game prices across Xbox, PlayStation, Nintendo Switch, and Steam at **games.cheapcharts.info**. Separate apps (iOS/Android), separate tracking. No public API documented - point users to the website if they ask about game deals.
+## CheapCharts Games (related but not in scope)
+
+CheapCharts also tracks video game prices at **games.cheapcharts.info** (Xbox, PlayStation, Nintendo Switch). It is a separate product: separate website, separate iOS/Android apps, and **no public API** (verified 2026-06-23 — all four GPT API endpoints and DetailData only serve movies/TV/books, not games).
+
+**If a user asks about game deals:** point them to the website and the mobile apps:
+- Website: https://games.cheapcharts.info
+- iOS app: id1622193150
+- Android app: com.cheapcharts.cheapcharts_games
+
+The `atl_check.py` script returns a clear error message if you pass `--store games` (it checks for the literal string and exits with code 2 + a redirect message). This is honest UX, not silent failure.
+
+If CheapCharts ever releases a games API, add it as a separate script (e.g., `scripts/games_atl_check.py`) rather than overloading this one — the data shapes, store codes, and item taxonomies are different.
+
+## Related Resources
+
 - **Mobile apps:** CheapCharts Movie & TV Deals (iOS: id772046134, Android: com.lollipapp.cc), CheapCharts Games (iOS: id1622193150, Android: com.cheapcharts.cheapcharts_games)
 - **JSON-LD hints:** Key CheapCharts website pages expose JSON-LD `potentialAction` hints that link directly to the GPT API endpoints with pre-filled parameters. Use as a browser-based fallback if the API doesn't cover a specific query.
 - **Apple TV app gap:** The Apple TV app uses a different catalog index than iTunes. Many deals (boxsets, complete series bundles, older catalog titles) appear on CheapCharts/iTunes but are invisible in the Apple TV app. If a user can't find a deal in Apple TV, direct them to the iTunes purchase link (`productPageUrl` or `iTunesUrl` from DetailData).
