@@ -17,6 +17,14 @@ metadata:
 **API Base URL:** `https://buster.cheapcharts.de/v1/gptapi/`
 **All-time-low (ATL) check:** `https://buster.cheapcharts.de/v1/DetailData.php` (unofficial internal endpoint - see Pitfall #17)
 
+**URL convention in recipes below:** To keep the recipes readable, the host is shortened to `$CC`. Treat it as a shell variable you set once per session, e.g.:
+
+```bash
+CC="https://buster.cheapcharts.de/v1"
+CC_API="$CC/gptapi"
+```
+Recipes then read `curl -s "$CC_API/Search.php?action=search&..."`. The full URL is `https://buster.cheapcharts.de/v1/gptapi/...`.
+
 ## Default Workflow (canonical pattern)
 
 When a user asks anything about deals, drops, prices, or "what's cheap right now", follow this flow:
@@ -69,7 +77,7 @@ Find items by title. Use this FIRST when you only have a title and need the IMDb
 **Optional:** `store=itunes` (default), `country=us` (default), `itemType=all` (default), `limit=20` (max 20), `offset=0`
 
 ```bash
-curl -s "https://buster.cheapcharts.de/v1/gptapi/Search.php?action=search&store=itunes&country=us&itemType=all&query=Fight%20Club&limit=5"
+curl -s "$CC_API/Search.php?action=search&store=itunes&country=us&itemType=all&query=Fight%20Club&limit=5"
 ```
 
 Returns flat list: `{"status":"success","results":[...items...]}`. Each item includes `imdbId` (if available), `mediaType` (movies/seasons/ebooks/audiobooks/albums), `priceFollowUpItemType` (use this value as `itemType` for Prices API), and `cheapChartsProductPageUrl`.
@@ -82,7 +90,7 @@ Current chart rankings for movies or TV seasons.
 **Optional:** `genre=All`, `quality=hd4k`, `limit`, `imdbRating` (min), `rottenTomatoesRating` (min), `releaseYear` (e.g. `2025-2025`)
 
 ```bash
-curl -s "https://buster.cheapcharts.de/v1/gptapi/Charts.php?action=getCharts&store=itunes&country=us&itemType=buymovies&genre=All&quality=hd4k&limit=10"
+curl -s "$CC_API/Charts.php?action=getCharts&store=itunes&country=us&itemType=buymovies&genre=All&quality=hd4k&limit=10"
 ```
 
 Returns: `{"status":"success","results":{"buymovies":[...]}}`. Items include `rank` field.
@@ -99,7 +107,7 @@ Current deals and price drops. Best for bargain hunting.
 **Date filter:** `releaseYear=YYYY-YYYY` accepts both single-year (`2026-2026`) and ranges (`2024-2026`). Works on Deals and Charts endpoints. NOT supported on Recommendations, Prices, or Search.
 
 ```bash
-curl -s "https://buster.cheapcharts.de/v1/gptapi/Deals.php?action=getDeals&store=itunes&country=us&itemType=buymovies&genre=ActionAdventure&sort=greatestSavings&maxPrice=4.99&limit=20"
+curl -s "$CC_API/Deals.php?action=getDeals&store=itunes&country=us&itemType=buymovies&genre=ActionAdventure&sort=greatestSavings&maxPrice=4.99&limit=20"
 ```
 
 Returns: `{"status":"success","results":{"buymovies":[...]}}`. Items include `price`, `priceBefore`, `imdbRating`, `rottenTomatoesRating`.
@@ -111,7 +119,7 @@ Look up current prices for specific titles by IMDb ID.
 **Required:** `action=getPrices`, `store`, `country`, `itemType=buymovies`, `imdbIDs` (comma-separated, e.g. `tt0468569,tt2911666`)
 
 ```bash
-curl -s "https://buster.cheapcharts.de/v1/gptapi/Prices.php?action=getPrices&store=itunes&country=us&itemType=buymovies&imdbIDs=tt0468569,tt2911666"
+curl -s "$CC_API/Prices.php?action=getPrices&store=itunes&country=us&itemType=buymovies&imdbIDs=tt0468569,tt2911666"
 ```
 
 Returns: `{"status":"success","results":{"buymovies":[...]}}`. Same item shape as Deals.
@@ -124,7 +132,7 @@ Curated recommendations, filtered by genre and quality.
 **Optional:** `genre=All`, `quality=hd4k`, `limit`, `imdbRating`, `rottenTomatoesRating`
 
 ```bash
-curl -s "https://buster.cheapcharts.de/v1/gptapi/Recommendations.php?action=getRecommendations&store=amazon&country=us&itemType=buymovies&genre=SciFiFantasy&quality=hd4k&limit=15&imdbRating=7"
+curl -s "$CC_API/Recommendations.php?action=getRecommendations&store=amazon&country=us&itemType=buymovies&genre=SciFiFantasy&quality=hd4k&limit=15&imdbRating=7"
 ```
 
 Returns: `{"status":"success","results":{"buymovies":[...]}}`. Items may include `description` field.
@@ -137,7 +145,7 @@ Top sellers across multiple stores. Does NOT require `itemType`.
 **Optional:** `maxItemCount=5` (per store per category)
 
 ```bash
-curl -s "https://buster.cheapcharts.de/v1/gptapi/Topseller.php?action=getTopsellerForStartpage&country=us&store=itunes,amazon,vudu,googlePlay&maxItemCount=5"
+curl -s "$CC_API/Topseller.php?action=getTopsellerForStartpage&country=us&store=itunes,amazon,vudu,googlePlay&maxItemCount=5"
 ```
 
 Returns: `{"status":"success","results":{"itunes":{"movies":[...],"seasons":[...]},"amazon":{...}}}`. Grouped by store, then by movies/seasons.
@@ -149,7 +157,7 @@ Returns: `{"status":"success","results":{"itunes":{"movies":[...],"seasons":[...
 **Required:** `store`, `country`, `itemType` (`movies` or `seasons` - NOT `buymovies`), `idInStore` (the iTunes store ID from Search results)
 
 ```bash
-curl -s "https://buster.cheapcharts.de/v1/DetailData.php?store=itunes&country=us&itemType=seasons&idInStore=1606238021"
+curl -s "$CC/v1/DetailData.php?store=itunes&country=us&itemType=seasons&idInStore=1606238021"
 ```
 
 Returns: `{"results":{"seasons":{...}}}` (key matches the `itemType` you passed).
@@ -257,19 +265,19 @@ Unknown values silently fall back to "All" - they do NOT error (Pitfall #22).
 ### Recipe: "Find deals on 4K action movies under $5"
 
 ```bash
-curl -s "https://buster.cheapcharts.de/v1/gptapi/Deals.php?action=getDeals&store=itunes&country=us&itemType=buymovies&genre=ActionAdventure&quality=hd4k&sort=greatestSavings&maxPrice=4.99&limit=20"
+curl -s "$CC_API/Deals.php?action=getDeals&store=itunes&country=us&itemType=buymovies&genre=ActionAdventure&quality=hd4k&sort=greatestSavings&maxPrice=4.99&limit=20"
 ```
 
 ### Recipe: "Highly-rated deals under $X" (IMDb + maxPrice both filter server-side)
 
 ```bash
-curl -s "https://buster.cheapcharts.de/v1/gptapi/Deals.php?action=getDeals&store=itunes&country=us&itemType=buymovies&genre=All&imdbRating=7&rottenTomatoesRating=80&maxPrice=9.99&sort=greatestSavings&limit=20"
+curl -s "$CC_API/Deals.php?action=getDeals&store=itunes&country=us&itemType=buymovies&genre=All&imdbRating=7&rottenTomatoesRating=80&maxPrice=9.99&sort=greatestSavings&limit=20"
 ```
 
 ### Recipe: "4K Dolby Vision + Atmos movies on sale" (filter client-side - see Pitfall #16)
 
 ```bash
-curl -s "https://buster.cheapcharts.de/v1/gptapi/Deals.php?action=getDeals&store=itunes&country=us&itemType=buymovies&genre=All&sort=greatestSavings&limit=50" | python -c "
+curl -s "$CC_API/Deals.php?action=getDeals&store=itunes&country=us&itemType=buymovies&genre=All&sort=greatestSavings&limit=50" | python -c "
 import sys, json
 items = json.load(sys.stdin)['results']['buymovies']
 premium = [i for i in items if i.get('has4K') in (1, True) and i.get('hasAtmos') in (1, True) and i.get('hdrFormat') == 'Dolby Vision']
@@ -283,14 +291,14 @@ for i in premium[:15]:
 
 ```bash
 # Step 1 - find IMDb ID
-imdb=$(curl -s "https://buster.cheapcharts.de/v1/gptapi/Search.php?action=search&store=itunes&country=us&itemType=all&query=The%20Dark%20Knight&limit=1" \
+imdb=$(curl -s "$CC_API/Search.php?action=search&store=itunes&country=us&itemType=all&query=The%20Dark%20Knight&limit=1" \
   | python -c "import sys,json; print(json.load(sys.stdin)['results'][0].get('imdbId',''))")
 echo "IMDb: $imdb"
 
 # Step 2 - query each store in parallel (only iTunes reliably supports prices; others via Topseller)
 for store in itunes amazon vudu googlePlay; do
   echo "=== $store ==="
-  curl -s "https://buster.cheapcharts.de/v1/gptapi/Prices.php?action=getPrices&store=$store&country=us&itemType=buymovies&imdbIDs=$imdb" \
+  curl -s "$CC_API/Prices.php?action=getPrices&store=$store&country=us&itemType=buymovies&imdbIDs=$imdb" \
     | python -c "
 import sys, json
 r = json.load(sys.stdin)
@@ -305,7 +313,7 @@ done
 ### Recipe: "Complete TV series on sale" (filter to bundle deals, avoid per-season noise)
 
 ```bash
-curl -s "https://buster.cheapcharts.de/v1/gptapi/Deals.php?action=getDeals&store=itunes&country=us&itemType=seasons&genre=All&sort=greatestSavings&limit=50" | python -c "
+curl -s "$CC_API/Deals.php?action=getDeals&store=itunes&country=us&itemType=seasons&genre=All&sort=greatestSavings&limit=50" | python -c "
 import sys, json
 items = json.load(sys.stdin)['results']['seasons']
 bundles = [i for i in items if i.get('isBundle') == 1]
@@ -318,7 +326,7 @@ for i in bundles[:10]:
 ### Recipe: "Cross-store top sellers today"
 
 ```bash
-curl -s "https://buster.cheapcharts.de/v1/gptapi/Topseller.php?action=getTopsellerForStartpage&country=us&store=itunes,amazon,vudu,googlePlay&maxItemCount=5" | python -c "
+curl -s "$CC_API/Topseller.php?action=getTopsellerForStartpage&country=us&store=itunes,amazon,vudu,googlePlay&maxItemCount=5" | python -c "
 import sys, json
 r = json.load(sys.stdin)
 if r.get('status') != 'success': sys.exit(r.get('message'))
@@ -335,12 +343,12 @@ for store, cats in r['results'].items():
 
 Step 1 - Search to get IMDb ID:
 ```bash
-curl -s "https://buster.cheapcharts.de/v1/gptapi/Search.php?action=search&store=itunes&country=us&itemType=all&query=The%20Dark%20Knight&limit=3"
+curl -s "$CC_API/Search.php?action=search&store=itunes&country=us&itemType=all&query=The%20Dark%20Knight&limit=3"
 ```
 
 Step 2 - Prices using IMDb ID from search results:
 ```bash
-curl -s "https://buster.cheapcharts.de/v1/gptapi/Prices.php?action=getPrices&store=itunes&country=us&itemType=buymovies&imdbIDs=tt0468569"
+curl -s "$CC_API/Prices.php?action=getPrices&store=itunes&country=us&itemType=buymovies&imdbIDs=tt0468569"
 ```
 
 ### Recipe: "Today's price drops on Apple TV/iTunes" (DEFAULT for "latest deals")
@@ -353,12 +361,12 @@ curl -s "https://buster.cheapcharts.de/v1/gptapi/Prices.php?action=getPrices&sto
 
 ```bash
 # Step 1 - pull the freshest drops (movies + seasons)
-curl -s "https://buster.cheapcharts.de/v1/gptapi/Deals.php?action=getDeals&store=itunes&country=us&itemType=buymovies&genre=All&sort=latestPricechange&limit=80"
-curl -s "https://buster.cheapcharts.de/v1/gptapi/Deals.php?action=getDeals&store=itunes&country=us&itemType=seasons&genre=All&sort=latestPricechange&limit=80"
+curl -s "$CC_API/Deals.php?action=getDeals&store=itunes&country=us&itemType=buymovies&genre=All&sort=latestPricechange&limit=80"
+curl -s "$CC_API/Deals.php?action=getDeals&store=itunes&country=us&itemType=seasons&genre=All&sort=latestPricechange&limit=80"
 
 # Step 2 - extract idInStore from cheapChartsProductPageUrl, then verify change date
 # CRITICAL: DetailData itemType is "movies" or "seasons", NOT "buymovies" (Pitfall #13)
-curl -s "https://buster.cheapcharts.de/v1/DetailData.php?store=itunes&country=us&itemType=movies&idInStore=1815368549" | python -c "
+curl -s "$CC/v1/DetailData.php?store=itunes&country=us&itemType=movies&idInStore=1815368549" | python -c "
 import sys, json
 m = json.load(sys.stdin)['results']['movies']
 print(f\"changeDate: {m.get('priceHdLastChangeDate') or m.get('priceSdLastChangeDate')}\")
@@ -398,7 +406,7 @@ python scripts/atl_check.py --json --limit 30
 ### Recipe: "Latest new-release movies on sale"
 
 ```bash
-curl -s "https://buster.cheapcharts.de/v1/gptapi/Deals.php?action=getDeals&store=itunes&country=us&itemType=buymovies&genre=All&sort=releaseDate&limit=500" | python -c "
+curl -s "$CC_API/Deals.php?action=getDeals&store=itunes&country=us&itemType=buymovies&genre=All&sort=releaseDate&limit=500" | python -c "
 import sys, json
 items = json.load(sys.stdin)['results']['buymovies']
 real = [i for i in items if not i.get('releaseDate','').startswith('2030')]
@@ -410,37 +418,37 @@ for i in real[:10]:
 ### Recipe: "Movies released this year that are on sale"
 
 ```bash
-curl -s "https://buster.cheapcharts.de/v1/gptapi/Deals.php?action=getDeals&store=itunes&country=us&itemType=buymovies&genre=All&releaseYear=2026-2026&sort=latestPricechange&limit=20"
+curl -s "$CC_API/Deals.php?action=getDeals&store=itunes&country=us&itemType=buymovies&genre=All&releaseYear=2026-2026&sort=latestPricechange&limit=20"
 ```
 
 ### Recipe: "TV season releases from a specific year range"
 
 ```bash
-curl -s "https://buster.cheapcharts.de/v1/gptapi/Deals.php?action=getDeals&store=itunes&country=us&itemType=seasons&genre=All&releaseYear=2024-2026&sort=releaseDate&limit=50"
+curl -s "$CC_API/Deals.php?action=getDeals&store=itunes&country=us&itemType=seasons&genre=All&releaseYear=2024-2026&sort=releaseDate&limit=50"
 ```
 
 ### Recipe: "Charts for new releases only"
 
 ```bash
-curl -s "https://buster.cheapcharts.de/v1/gptapi/Charts.php?action=getCharts&store=itunes&country=us&itemType=buymovies&genre=All&quality=hd4k&releaseYear=2026-2026&limit=20"
+curl -s "$CC_API/Charts.php?action=getCharts&store=itunes&country=us&itemType=buymovies&genre=All&quality=hd4k&releaseYear=2026-2026&limit=20"
 ```
 
 ### Recipe: "Best sci-fi recommendations on Amazon with IMDb 7+"
 
 ```bash
-curl -s "https://buster.cheapcharts.de/v1/gptapi/Recommendations.php?action=getRecommendations&store=amazon&country=us&itemType=buymovies&genre=SciFiFantasy&quality=hd4k&limit=15&imdbRating=7"
+curl -s "$CC_API/Recommendations.php?action=getRecommendations&store=amazon&country=us&itemType=buymovies&genre=SciFiFantasy&quality=hd4k&limit=15&imdbRating=7"
 ```
 
 ### Recipe: "What's trending across all stores?"
 
 ```bash
-curl -s "https://buster.cheapcharts.de/v1/gptapi/Topseller.php?action=getTopsellerForStartpage&country=us&store=itunes,amazon,vudu,googlePlay&maxItemCount=5"
+curl -s "$CC_API/Topseller.php?action=getTopsellerForStartpage&country=us&store=itunes,amazon,vudu,googlePlay&maxItemCount=5"
 ```
 
 ### Recipe: "Highly-rated horror movies on sale"
 
 ```bash
-curl -s "https://buster.cheapcharts.de/v1/gptapi/Deals.php?action=getDeals&store=itunes&country=us&itemType=buymovies&genre=Horror&sort=greatestSavings&imdbRating=7&limit=20"
+curl -s "$CC_API/Deals.php?action=getDeals&store=itunes&country=us&itemType=buymovies&genre=Horror&sort=greatestSavings&imdbRating=7&limit=20"
 ```
 
 ## Gift Card Stacking Strategy
