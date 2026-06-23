@@ -4,4 +4,4 @@
 
 The complete skill manifest is in [`SKILL.md`](SKILL.md). The literal `curl` recipes are in [`RECIPES.md`](RECIPES.md). Sample output is in [`examples/`](examples/).
 
-For install instructions, see the [repo-level README](../../README.md).
+For install instructions, see the repo-level README: https://github.com/tracerman/cheapcharts-skill#install
