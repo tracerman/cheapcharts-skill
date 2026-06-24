@@ -1,7 +1,7 @@
 ---
 name: cheapcharts
 description: "Use when looking up movie/TV show deals, charts, or recommendations on iTunes/Apple TV, Amazon, Vudu, or Google Play. The headline feature is parallel all-time-low (ATL) detection: a 50-item deal batch is verified against the DetailData endpoint in ~12 seconds, so you can tell which of today's drops are actually at the historical floor and which are routine sales. Fake discounts (manipulated baselines, sub-$1 changes) are filtered out."
-version: 2.3.1
+version: 2.3.2
 author: tracerman (built with love and coffee)
 license: MIT
 metadata:
