@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/header.png" alt="CheapCharts Skill" width="800">
+</p>
+
 # CheapCharts Skill
 
 > Agent skill for finding digital movie and TV deals that are actually worth buying, with parallel all-time-low checks across the stores CheapCharts tracks.
@@ -39,9 +43,16 @@ The script emits JSON for cron pipelines or formatted tables for humans, so the 
 
 ## Demo
 
-![Apple TV drops on 2026-06-23](skills/cheapcharts/examples/demo-2026-06-23.png)
+Four independent runs against the live CheapCharts API on 2026-06-24, each capturing a different use case the skill is designed for. ATL rows are highlighted in green; rows are sorted by savings within each panel.
 
-Real output from a 2026-06-23 run against the live CheapCharts API, with each drop's `priceHdLastChangeDate` verified against the internal `DetailData` endpoint. ATL rows are highlighted in green; non-ATL rows show a `-` in the ATL column. IMDb and Rotten Tomatoes scores appear only for individual movies. Bundles, TV seasons, and complete-series bundles show `-`, because CheapCharts doesn't carry ratings for those.
+| | |
+|:---:|:---:|
+| ![ATL movie deals](skills/cheapcharts/examples/demo-movies-2026-06-24.png) | ![Multi-film bundle deals](skills/cheapcharts/examples/demo-bundles-2026-06-24.png) |
+| All-time low movie deals | Multi-film bundle deals |
+| ![TV season ATL deals](skills/cheapcharts/examples/demo-seasons-2026-06-24.png) | ![Today's price drops](skills/cheapcharts/examples/demo-today-2026-06-24.png) |
+| TV season deals at ATL | Today's price drops (verified) |
+
+Each drop's `priceHdLastChangeDate` is verified against the internal `DetailData` endpoint. IMDb and Rotten Tomatoes scores appear only for individual movies; bundles, TV seasons, and complete-series bundles show `-` because CheapCharts doesn't carry ratings for those. The `[BOTH]` tag means the price is the floor in both HD and SD; `[HD]` or `[SD]` means just one.
 
 ## Example output
 
