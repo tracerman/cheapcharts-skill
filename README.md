@@ -82,6 +82,18 @@ Werner Herzog: Radical Dreamer   $4.99   $9.99   $5.00  ATL  -     2026-06-23
 ...
 ```
 
+Combined filters (genre + max price + min savings):
+
+```
+$ python scripts/atl_check.py --genre Horror --max-price 4.99 --min-savings 3
+
+=== 9 buymovies currently at ATL (out of 10 checked) [genre=Horror, maxPrice=$4.99] ===
+
+  [BOTH] Human Resources | $1.99 (was $14.99, save $13.00) | changed 2023-05-29
+  [BOTH] The Housemaid (2018) | $4.99 (was $14.99, save $10.00) | changed 2025-05-02
+  ...
+```
+
 See [`skills/cheapcharts/examples/today-2026-06-23.md`](skills/cheapcharts/examples/today-2026-06-23.md) for a full real-world report.
 
 ## Repo structure (skill package)
@@ -106,7 +118,7 @@ This is the canonical [Agent Skills](https://agentskills.io/specification) layou
 
 CheapCharts has a website that shows current prices, but it doesn't expose the all-time-low flag in the UI. The underlying DetailData endpoint does - it's just not surfaced. This skill wraps that up and gives you a script that:
 
-- Pulls the latest deals across all four stores
+- Pulls the latest deals from CheapCharts (iTunes works best; Amazon/Vudu/Google Play supported but sparser)
 - Hits DetailData in parallel (12 workers, ~12s for 50 items)
 - Tells you which drops are at the historical floor (`ATL`) vs. just a typical sale
 - Skips "fake drops" (manipulated `priceBefore` baselines, <$1 changes)
