@@ -61,7 +61,7 @@ curl -L https://raw.githubusercontent.com/tracerman/cheapcharts-skill/main/skill
 Then type `/cheapcharts` in Claude Code.
 
 **Claude Desktop (upload skill zip):**
-1. Download [`cheapcharts-claude-desktop.zip`](https://github.com/tracerman/cheapcharts-skill/releases/download/v2.0.0/cheapcharts-claude-desktop.zip)
+1. Download [`cheapcharts-claude-desktop.zip`](https://github.com/tracerman/cheapcharts-skill/releases/download/v2.1.0/cheapcharts-claude-desktop.zip)
 2. Open Claude Desktop > Settings > Features > Skills
 3. Click "Upload" and select the zip file
 4. Requires Pro/Max/Team/Enterprise plan with code execution enabled
@@ -148,7 +148,7 @@ iTunes and Apple TV are used interchangeably - same underlying catalog. Apple re
 | Vercel / skills.sh (any agent) | `npx skills add tracerman/cheapcharts-skill` |
 | Hermes Agent | `hermes skills install tracerman/cheapcharts-skill` |
 | Claude Code (slash command) | Copy `skills/cheapcharts/claude-code/cheapcharts.md` to `~/.claude/commands/` |
-| Claude Desktop (upload) | Download [zip](https://github.com/tracerman/cheapcharts-skill/releases/download/v2.0.0/cheapcharts-claude-desktop.zip), upload via Settings > Features > Skills |
+| Claude Desktop (upload) | Download [zip](https://github.com/tracerman/cheapcharts-skill/releases/download/v2.1.0/cheapcharts-claude-desktop.zip), upload via Settings > Features > Skills |
 | Plain Python | `git clone … && python skills/cheapcharts/scripts/atl_check.py --title "Bernie"` |
 
 The skill package follows the canonical [Agent Skills spec](https://agentskills.io/specification): one repo, one or more skill subdirectories under `skills/`, each with a `SKILL.md` and optional `scripts/`, `references/`, `assets/`. Tools like `npx skills` and `hermes skills install` both understand this layout.
