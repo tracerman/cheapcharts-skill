@@ -1,6 +1,6 @@
 # CheapCharts Skill (by tracerman)
 
-> A free, public-API price tracker for digital movies and TV shows on iTunes/Apple TV, Amazon, Vudu, and Google Play - with an all-time-low (ATL) checker that the official CheapCharts UI doesn't expose.
+> A free, public-API price tracker for digital movies and TV shows on iTunes/Apple TV, Amazon, Vudu, and Google Play - with a parallel ATL checker that scans 50 drops in ~12s (the website only shows the ATL badge on individual title pages, so bulk checking means 50 clicks).
 
 *Built by [tracerman](https://github.com/tracerman) with love and coffee.*
 
@@ -26,7 +26,7 @@ The screenshot above is real output - the script ran against the live CheapChart
 
 This is an **agent skill** that lets any AI agent (Hermes, Claude Code, OpenAI Codex, Cursor, etc.) look up movie and TV show prices across all four major US digital stores, and check whether a given drop is at the historical floor (all-time low / ATL).
 
-It wraps the [CheapCharts public API](https://www.cheapcharts.com/us/ai) (no auth, no rate limits) and includes:
+It wraps the [CheapCharts public API](https://www.cheapcharts.com/us/ai) (no auth required; `DetailData` is rate-sensitive at high concurrency, hence the 12-worker cap) and includes:
 
 - A complete `SKILL.md` manifest with all endpoints, recipes, and pitfalls
 - A parallel `atl_check.py` script that finds ATL deals in ~12 seconds for 50 items
@@ -122,7 +122,7 @@ This is the canonical [Agent Skills](https://agentskills.io/specification) layou
 
 ## Why this exists
 
-CheapCharts has a website that shows current prices, but it doesn't expose the all-time-low flag in the UI. The underlying DetailData endpoint does - it's just not surfaced. This skill wraps that up and gives you a script that:
+CheapCharts' website shows an ATL badge the first time a title hits the historical floor, but it does not surface concurrent ATLs - i.e. it will not tell you that a price currently sitting at the floor *was already at the floor last week*. Its deals-listing endpoints (`buymovies`, `rentalmovies`) only return price+title, with no `DetailData` fields, so you can't see which of today's drops are at the floor without checking each one. This skill wraps the same `DetailData` endpoint the site uses and hits it in parallel, so you can see exactly which of today's drops are at the historical floor and which are just typical sales, in ~12s for 50 items instead of 50 page loads. It gives you a script that:
 
 - Pulls the latest deals from CheapCharts (iTunes works best; Amazon/Vudu/Google Play supported but sparser)
 - Hits DetailData in parallel (12 workers, ~12s for 50 items)
@@ -158,7 +158,7 @@ The skill package follows the canonical [Agent Skills spec](https://agentskills.
 Issues and PRs welcome. The most useful contributions:
 
 - New recipes for the SKILL.md / RECIPES.md
-- More robust ATL detection (current `priceHdIsLowest` flag is the most reliable signal we have)
+- More robust ATL detection (`priceHdIsLowest` is the only ATL signal the API exposes directly; the only alternatives are deriving it from `priceHdLastChangeDate` + your own price history)
 - Multi-store parallelization (bundled script is iTunes-only by default)
 - Real examples in `examples/`
 
