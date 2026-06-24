@@ -106,7 +106,7 @@ iTunes and Apple TV are the same underlying catalog (Apple rebranded iTunes Movi
 - Purchase (`buymovies`), rental (`rentalmovies`), and TV (`seasons`) lookups
 - Script filters for genre, max price, release year, and quality (IMDb / Rotten Tomatoes filtering exists on the API but isn't a script flag, and ratings only exist for individual movies, not bundles or TV seasons)
 - JSON output for cron pipelines, formatted tables for humans
-- Wraps the free CheapCharts API, currently unauthenticated, so no API key is required
+- Wraps the free, public CheapCharts API; no auth or API key required
 - A complete `SKILL.md` manifest with endpoints, recipes, and pitfalls
 - A Claude Code slash command and a GitHub Actions smoke test
 - Digital movie and TV deals only; physical media (Blu-ray, DVD) is out of scope
