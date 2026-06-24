@@ -1,7 +1,7 @@
 ---
 name: cheapcharts
 description: "Use when looking up movie/TV show deals, charts, or recommendations on iTunes/Apple TV, Amazon, Vudu, or Google Play. The default output is a markdown table of all current deals sorted by latest price change, with an ATL column flagging which deals are at their historical low (parallel DetailData check, ~12 seconds for 50 items). Pass --atl-only to filter to ATL rows only. Fake discounts (manipulated baselines, sub-$1 changes) and multi-film bundles are filtered out by default. No auth or API key required."
-version: 3.0.1
+version: 3.0.2
 author: tracerman (built with love and coffee)
 license: MIT
 metadata:

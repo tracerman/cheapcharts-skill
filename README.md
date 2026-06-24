@@ -42,9 +42,8 @@ Four independent runs against the live CheapCharts API on 2026-06-24, each captu
 | ![TV season ATL deals](skills/cheapcharts/examples/demo-seasons-2026-06-24.png) | ![Today's price drops](skills/cheapcharts/examples/demo-today-2026-06-24.png) |
 | TV season deals at ATL | Today's price drops |
 
-The `deals.py` script outputs a markdown table like:
+The `deals.py` script outputs a markdown table:
 
-```markdown
 **5 buymovies** (out of 5 checked)
 
 | Title | Fmt | Now | Was | Save | IMDb | RT | Date | ATL | Buy | History |
@@ -52,7 +51,6 @@ The `deals.py` script outputs a markdown table like:
 | [Burt](https://tv.apple.com/us/movie/umc.cmc.7dlscf08qk4gtqad1ysutbs31?at=1l3v4gB) | HD | $9.99 | $11.99 | $2.00 (17%) | - | - | 2026-06-23 | ✓ | [Buy](https://tv.apple.com/us/movie/umc.cmc.7dlscf08qk4gtqad1ysutbs31?at=1l3v4gB) | [History](https://www.cheapcharts.com/us/itunes/movies/1888698719) |
 | [Going Clear](https://tv.apple.com/us/movie/umc.cmc.5sjuv6fnbcpgjkaiion1hb7yt?at=1l3v4gB) | HD | $6.99 | $12.99 | $6.00 (46%) | 8 | 95 | 2026-06-23 | - | [Buy](https://tv.apple.com/us/movie/umc.cmc.5sjuv6fnbcpgjkaiion1hb7yt?at=1l3v4gB) | [History](https://www.cheapcharts.com/us/itunes/movies/1876110281) |
 | [Springsteen: Deliver Me from Nowhere](https://tv.apple.com/us/movie/umc.cmc.44ij3fzlajh43wxngtyxd6ioi?at=1l3v4gB) | 4K | $4.99 | $7.99 | $3.00 (38%) | 6.7 | 61 | 2026-06-24 | ✓ | [Buy](https://tv.apple.com/us/movie/umc.cmc.44ij3fzlajh43wxngtyxd6ioi?at=1l3v4gB) | [History](https://www.cheapcharts.com/us/itunes/movies/1853855567) |
-```
 
 The `ATL` column shows `✓` for titles currently at their all-time low and `-` for typical sales. The `[Buy](url)` link goes to the Apple TV purchase page; `[History](url)` goes to the CheapCharts price-history page. Titles are direct-clickable (each `[Title](url)` links to Apple TV). Format column shows `4K` / `HD` / `SD` based on `has4K` in DetailData. IMDb and RT columns show `-` for bundles and TV seasons (CheapCharts doesn't carry ratings for those item types).
 
@@ -90,7 +88,7 @@ iTunes and Apple TV are the same underlying catalog (Apple rebranded iTunes Movi
 | skills.sh (any agent) | `npx skills add tracerman/cheapcharts-skill` |
 | Hermes Agent | `hermes skills install tracerman/cheapcharts-skill` |
 | Claude Code | Copy the slash command into `~/.claude/commands/` (see below), then type `/cheapcharts` |
-| Claude Desktop | Upload the [release zip](https://github.com/tracerman/cheapcharts-skill/releases/download/v3.0.1/cheapcharts-claude-desktop.zip) via Settings > Features > Skills |
+| Claude Desktop | Upload the [release zip](https://github.com/tracerman/cheapcharts-skill/releases/download/v3.0.2/cheapcharts-claude-desktop.zip) via Settings > Features > Skills |
 | Plain Python | Clone and run `deals.py` directly (see below) |
 
 **Claude Code slash command:**
@@ -101,7 +99,7 @@ curl -L https://raw.githubusercontent.com/tracerman/cheapcharts-skill/main/skill
   -o ~/.claude/commands/cheapcharts.md
 ```
 
-**Claude Desktop** requires a Pro/Max/Team/Enterprise plan with code execution enabled. Download [`cheapcharts-claude-desktop.zip`](https://github.com/tracerman/cheapcharts-skill/releases/download/v3.0.1/cheapcharts-claude-desktop.zip), then Settings > Features > Skills > Upload.
+**Claude Desktop** requires a Pro/Max/Team/Enterprise plan with code execution enabled. Download [`cheapcharts-claude-desktop.zip`](https://github.com/tracerman/cheapcharts-skill/releases/download/v3.0.2/cheapcharts-claude-desktop.zip), then Settings > Features > Skills > Upload.
 
 **Plain Python** (no agent), Python 3.9+, standard library only:
 
