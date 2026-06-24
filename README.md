@@ -20,7 +20,7 @@
 
 ![Apple TV drops on 2026-06-23](skills/cheapcharts/examples/demo-2026-06-23.png)
 
-The screenshot above is real output - the script ran against the live CheapCharts API on 2026-06-23 and verified each drop's `priceHdLastChangeDate` against the internal `DetailData` endpoint. ATL rows are highlighted in green; non-ATL rows show a `-` in the ATL column. The screenshot is regenerated daily by the CI smoke test against that day's data.
+The screenshot above is real output - the script ran against the live CheapCharts API on 2026-06-23 and verified each drop's `priceHdLastChangeDate` against the internal `DetailData` endpoint. ATL rows are highlighted in green; non-ATL rows show a `-` in the ATL column.
 
 ## What is this
 
@@ -122,7 +122,7 @@ This is the canonical [Agent Skills](https://agentskills.io/specification) layou
 
 ## Why this exists
 
-CheapCharts' website shows an ATL badge on individual title pages, but its deals-listing endpoints (`buymovies`, `rentalmovies`) only return price+title - no `DetailData` fields. This skill wraps the same `DetailData` endpoint the site uses and hits it in parallel, so you can see which of today's 50 drops are at the historical floor without 50 page loads. It gives you a script that:
+CheapCharts' website shows an ATL badge the first time a title hits the historical floor, but it does not surface concurrent ATLs - i.e. it will not tell you that a price currently sitting at the floor *was already at the floor last week*. Its deals-listing endpoints (`buymovies`, `rentalmovies`) only return price+title, with no `DetailData` fields, so you can't see which of today's drops are at the floor without checking each one. This skill wraps the same `DetailData` endpoint the site uses and hits it in parallel, so you can see exactly which of today's drops are at the historical floor and which are just typical sales, in ~12s for 50 items instead of 50 page loads. It gives you a script that:
 
 - Pulls the latest deals from CheapCharts (iTunes works best; Amazon/Vudu/Google Play supported but sparser)
 - Hits DetailData in parallel (12 workers, ~12s for 50 items)
