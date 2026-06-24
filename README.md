@@ -2,7 +2,7 @@
   <img src="assets/header.png" alt="CheapCharts Skill" width="800">
 </p>
 
-# CheapCharts Skill
+# CheapCharts Skill 
 
 > Agent skill for finding digital movie and TV deals across iTunes/Apple TV, Amazon, Vudu, and Google Play - with a markdown deal report that flags which drops are at their all-time low.
 
