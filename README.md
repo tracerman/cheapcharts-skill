@@ -90,7 +90,7 @@ iTunes and Apple TV are the same underlying catalog (Apple rebranded iTunes Movi
 | skills.sh (any agent) | `npx skills add tracerman/cheapcharts-skill` |
 | Hermes Agent | `hermes skills install tracerman/cheapcharts-skill` |
 | Claude Code | Copy the slash command into `~/.claude/commands/` (see below), then type `/cheapcharts` |
-| Claude Desktop | Upload the [release zip](https://github.com/tracerman/cheapcharts-skill/releases/download/v3.0.0/cheapcharts-claude-desktop.zip) via Settings > Features > Skills |
+| Claude Desktop | Upload the [release zip](https://github.com/tracerman/cheapcharts-skill/releases/download/v3.0.1/cheapcharts-claude-desktop.zip) via Settings > Features > Skills |
 | Plain Python | Clone and run `deals.py` directly (see below) |
 
 **Claude Code slash command:**
@@ -101,7 +101,7 @@ curl -L https://raw.githubusercontent.com/tracerman/cheapcharts-skill/main/skill
   -o ~/.claude/commands/cheapcharts.md
 ```
 
-**Claude Desktop** requires a Pro/Max/Team/Enterprise plan with code execution enabled. Download [`cheapcharts-claude-desktop.zip`](https://github.com/tracerman/cheapcharts-skill/releases/download/v3.0.0/cheapcharts-claude-desktop.zip), then Settings > Features > Skills > Upload.
+**Claude Desktop** requires a Pro/Max/Team/Enterprise plan with code execution enabled. Download [`cheapcharts-claude-desktop.zip`](https://github.com/tracerman/cheapcharts-skill/releases/download/v3.0.1/cheapcharts-claude-desktop.zip), then Settings > Features > Skills > Upload.
 
 **Plain Python** (no agent), Python 3.9+, standard library only:
 
