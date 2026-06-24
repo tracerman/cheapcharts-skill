@@ -1,7 +1,7 @@
 ---
 name: cheapcharts
 description: "Use when looking up digital movie/TV show prices, deals, charts, or recommendations across iTunes, Amazon, Vudu, and Google Play. Free public API, no auth required."
-version: 1.5.0
+version: 1.6.0
 author: tracerman (built with love and coffee)
 license: MIT
 metadata:
@@ -68,7 +68,7 @@ The full "today's drops" recipe with Python verification is in the Workflow Reci
 
 Find items by title. Use this FIRST when you only have a title and need the IMDb ID.
 
-**Required:** `action=search`, `query=<title>`
+**Required:** `action=search`, `query=<title>` (or `searchTerm=<title>` - alias, per vendor's llms.txt)
 **Optional:** `store=itunes` (default), `country=us` (default), `itemType=all` (default), `limit=20` (max 20), `offset=0`
 
 *(see [RECIPES.md](RECIPES.md))*
@@ -191,11 +191,16 @@ Returns: `{"results":{"seasons":{...}}}` (key matches the `itemType` you passed)
 
 ### ItemType
 
-| Value | Meaning |
-|---|---|
-| `buymovies` | Movies (purchase prices) |
-| `seasons` | TV show seasons |
-| `all` | Search only - returns all media types (movies, seasons, ebooks, audiobooks, albums) |
+| Value | Meaning | Used by |
+|---|---|---|
+| `buymovies` | Movies (purchase prices) | Charts, Deals, Prices, Recommendations |
+| `rentalmovies` | Movies (rental prices, ~30 days to start, 48h to finish) | Charts, Deals, Prices (per official llms.txt) |
+| `seasons` | TV show seasons | Charts, Deals, Recommendations, DetailData |
+| `movies` | Movie metadata only | Search only |
+| `seasons` | Season metadata only | Search only |
+| `all` | All media types (movies, seasons, ebooks, audiobooks, albums) | Search only |
+
+**Purchase vs rental (verified 2026-06-23 against vendor's llms.txt):** The Prices endpoint's `itemType` parameter accepts `buymovies` (purchase price) or `rentalmovies` (rental price). Rentals are typically 30 days to start watching and 48 hours to finish once started. The Search endpoint can return either type — the `priceFollowUpItemType` field tells you which one to use in the follow-up Prices call. The `atl_check.py` script only handles `buymovies`; for rental-specific deals, query Prices directly with `itemType=rentalmovies`.
 
 ### Genre
 
@@ -239,7 +244,27 @@ Unknown values silently fall back to "All" - they do NOT error (Pitfall #22).
 | `description` | no | Short synopsis (if available) |
 | `rank` | no | Chart rank position (Charts endpoint only) |
 | `mediaType` | Search only | movies, seasons, ebooks, audiobooks, albums |
-| `priceFollowUpItemType` | Search only | Use this as `itemType` for Prices API follow-up |
+| `priceFollowUpItemType` | Search only | Use this as `itemType` for Prices API follow-up (can be `buymovies` OR `rentalmovies` per official llms.txt) |
+| `currentPrice` | Search only | Alias for `price` in Search responses |
+
+## Endpoint Decision Tree
+
+When a user asks about prices, deals, or discovery, this is the canonical flow:
+
+| User question | First call | Why |
+|---|---|---|
+| "How much is [title]?" | `Search.php` to get IMDb ID, then `Prices.php` | Search resolves the title; Prices returns current numbers per store |
+| "What are the current deals?" | `Deals.php` with `sort=latestPricechange` | Returns price drops in chronological order |
+| "What are the best deals under $X?" | `Deals.php` with `maxPrice=X&sort=greatestSavings` | Server-side filter for price cap; sort by savings |
+| "What's the price of a [rental/buy] of [title]?" | `Search.php` first, then `Prices.php` with `itemType=rentalmovies` or `itemType=buymovies` | Use the `priceFollowUpItemType` from Search to pick the right one |
+| "What's popular / what's selling?" | `Topseller.php` with `store=itunes,amazon,vudu,googlePlay` | Cross-store top sellers; only endpoint that batches all 4 stores in one call |
+| "What's the #1 chart in [genre]?" | `Charts.php` with `genre=X&limit=10` | Ranked chart per store/genre/quality |
+| "Recommend a good [genre] movie" | `Recommendations.php` with `genre=X&imdbRating=7` | Curated, not just chart |
+| "Compare [title] across all 4 stores" | `Search.php` -> get IMDb ID -> 4x `Prices.php` calls in parallel | One IMDb ID, four store prices |
+| "What was the all-time low for [title]?" | `Search.php` -> get `idInStore` -> `DetailData.php` | Only DetailData exposes `priceHdIsLowest` |
+| "What just dropped in price today?" | `Deals.php` with `sort=latestPricechange` + `DetailData.php` to verify the `priceHdLastChangeDate` | Deals doesn't tell you the actual change date; DetailData does |
+
+**Topseller is the only endpoint that does cross-store batching.** Deals/Charts/Recommendations all require a single `store` parameter. If a user wants "what's selling across all four stores," Topseller is the answer; otherwise query each store separately.
 
 ## Workflow Recipes
 

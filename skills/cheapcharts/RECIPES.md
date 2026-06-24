@@ -2,6 +2,8 @@
 
 > **This file contains the literal `curl` recipes for the CheapCharts API.** It is separated from `SKILL.md` so the SKILL.md frontmatter and body are free of inline URL+command patterns (which trip content scanners).
 >
+> **Source of truth:** CheapCharts' official AI agent documentation at https://www.cheapcharts.com/llms.txt (verified 2026-06-23). When llms.txt and these recipes disagree, llms.txt wins.
+>
 > **For agent use:** when SKILL.md says "see Recipe: <name>", jump to the matching section here. All recipes assume the following URL convention:
 >
 > ```bash
@@ -397,3 +399,62 @@ curl -s "https://www.imdb.com/title/tt0468569/" -A "Mozilla/5.0" \
 
 ---
 
+
+---
+
+## Rental prices (verify and lookup)
+
+The Prices endpoint's `itemType` parameter accepts `rentalmovies` for rental prices. The Search endpoint's `priceFollowUpItemType` field tells you which one to use.
+
+```bash
+# Step 1: Search to get the IMDb ID and priceFollowUpItemType
+curl -s "https://buster.cheapcharts.de/v1/gptapi/Search.php?action=search&store=itunes&country=us&itemType=all&query=Inception&limit=1"
+# Look at: results[0].priceFollowUpItemType - will be "buymovies" or "rentalmovies"
+```
+
+```bash
+# Step 2: Get the rental price for a specific title
+curl -s "https://buster.cheapcharts.de/v1/gptapi/Prices.php?action=getPrices&store=itunes&country=us&itemType=rentalmovies&imdbIDs=tt1375666"
+```
+
+```bash
+# Find all current rental deals (no rental-specific sort/filter - just use sort=greatestSavings)
+curl -s "https://buster.cheapcharts.de/v1/gptapi/Deals.php?action=getDeals&store=itunes&country=us&itemType=rentalmovies&sort=greatestSavings&limit=20"
+```
+
+---
+
+## Topseller cross-store batch (the only multi-store endpoint)
+
+```bash
+# Top 5 sellers per store per category, all four US stores in one call
+curl -s "https://buster.cheapcharts.de/v1/gptapi/Topseller.php?action=getTopsellerForStartpage&country=us&store=itunes,amazon,vudu,googlePlay&maxItemCount=5"
+```
+
+```bash
+# Top 10 across just iTunes and Amazon
+curl -s "https://buster.cheapcharts.de/v1/gptapi/Topseller.php?action=getTopsellerForStartpage&country=us&store=itunes,amazon&maxItemCount=10"
+```
+
+```bash
+# Topseller for Germany (only iTunes + Amazon supported there)
+curl -s "https://buster.cheapcharts.de/v1/gptapi/Topseller.php?action=getTopsellerForStartpage&country=de&store=itunes,amazon&maxItemCount=5"
+```
+
+Note: Topseller does NOT take `itemType` - it always returns both `movies` and `seasons` per store. The response is grouped by store, then by movies/seasons.
+
+---
+
+## DetailData - the unofficial internal endpoint (for ATL checks and full price history)
+
+```bash
+# Single title detail (iTunes id from Search results)
+curl -s "https://buster.cheapcharts.de/v1/DetailData.php?store=itunes&country=us&itemType=movies&idInStore=1815368549"
+```
+
+```bash
+# Season/bundle detail
+curl -s "https://buster.cheapcharts.de/v1/DetailData.php?store=itunes&country=us&itemType=seasons&idInStore=1606238021"
+```
+
+The DetailData endpoint is NOT in the official gptapi surface (it was discovered by inspecting CheapCharts' website network calls). It returns the ATL flag (`priceHdIsLowest` / `priceSdIsLowest`), full price history, child seasons for bundles, and other fields the public gptapi endpoints don't expose. For ATL detection, always use the `IsLowest` flag - do not try to parse the `priceHdEvolution` string (Pitfall #26 in SKILL.md).
