@@ -34,3 +34,6 @@ desktop.ini
 # Local env
 .env
 .env.local
+
+# Release zips (built artifacts, not source)
+*.zip
