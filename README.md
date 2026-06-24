@@ -120,7 +120,7 @@ Install with whatever tool your agent uses. The skill lives at [`skills/cheapcha
 | skills.sh (any agent) | `npx skills add tracerman/cheapcharts-skill` |
 | Hermes Agent | `hermes skills install tracerman/cheapcharts-skill` |
 | Claude Code | Copy the slash command into `~/.claude/commands/` (see below), then type `/cheapcharts` |
-| Claude Desktop | Upload the [release zip](https://github.com/tracerman/cheapcharts-skill/releases/download/v2.3.0/cheapcharts-claude-desktop.zip) via Settings > Features > Skills |
+| Claude Desktop | Upload the [release zip](https://github.com/tracerman/cheapcharts-skill/releases/download/v2.3.1/cheapcharts-claude-desktop.zip) via Settings > Features > Skills |
 | Plain Python | Clone and run `atl_check.py` directly (see below) |
 
 **Claude Code slash command:**
@@ -130,7 +130,7 @@ curl -L https://raw.githubusercontent.com/tracerman/cheapcharts-skill/main/skill
   -o ~/.claude/commands/cheapcharts.md
 ```
 
-**Claude Desktop** requires a Pro/Max/Team/Enterprise plan with code execution enabled. Download [`cheapcharts-claude-desktop.zip`](https://github.com/tracerman/cheapcharts-skill/releases/download/v2.3.0/cheapcharts-claude-desktop.zip), then Settings > Features > Skills > Upload.
+**Claude Desktop** requires a Pro/Max/Team/Enterprise plan with code execution enabled. Download [`cheapcharts-claude-desktop.zip`](https://github.com/tracerman/cheapcharts-skill/releases/download/v2.3.1/cheapcharts-claude-desktop.zip), then Settings > Features > Skills > Upload.
 
 **Plain Python** (no agent), Python 3.9+, standard library only:
 ```bash
