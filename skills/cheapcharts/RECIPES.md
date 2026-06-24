@@ -458,3 +458,53 @@ curl -s "https://buster.cheapcharts.de/v1/DetailData.php?store=itunes&country=us
 ```
 
 The DetailData endpoint is NOT in the official gptapi surface (it was discovered by inspecting CheapCharts' website network calls). It returns the ATL flag (`priceHdIsLowest` / `priceSdIsLowest`), full price history, child seasons for bundles, and other fields the public gptapi endpoints don't expose. For ATL detection, always use the `IsLowest` flag - do not try to parse the `priceHdEvolution` string (Pitfall #26 in SKILL.md).
+
+
+---
+
+## Combined filters (per llms.txt guideline #11)
+
+llms.txt says: "Combine filters for precise results: e.g., Horror movies under $5 with IMDb rating above 7 released between 2015-2025."
+
+```bash
+# Horror movies under $5, IMDb 7+, released 2015-2025
+curl -s "https://buster.cheapcharts.de/v1/gptapi/Deals.php?action=getDeals&store=itunes&country=us&itemType=buymovies&genre=Horror&maxPrice=4.99&imdbRating=7&releaseYear=2015-2025&sort=greatestSavings&limit=20"
+```
+
+```bash
+# Or via the script (all filters supported as CLI flags):
+python scripts/atl_check.py --genre Horror --max-price 4.99 --min-savings 3 --release-year 2015-2025 --limit 20
+```
+
+---
+
+## Search with pagination (offset parameter)
+
+```bash
+# Page 1 (first 20 results)
+curl -s "https://buster.cheapcharts.de/v1/gptapi/Search.php?action=search&store=itunes&country=us&itemType=all&query=Batman&limit=20&offset=0"
+
+# Page 2 (results 21-40)
+curl -s "https://buster.cheapcharts.de/v1/gptapi/Search.php?action=search&store=itunes&country=us&itemType=all&query=Batman&limit=20&offset=20"
+```
+
+---
+
+## Topseller with bundle detection
+
+```bash
+# Top sellers across all four stores, with bundle flagging
+curl -s "https://buster.cheapcharts.de/v1/gptapi/Topseller.php?action=getTopsellerForStartpage&country=us&store=itunes,amazon,vudu,googlePlay&maxItemCount=5" | python -c "
+import sys, json
+r = json.load(sys.stdin)
+if r.get('status') != 'success': sys.exit(r.get('message'))
+for store, cats in r['results'].items():
+    for cat, items in cats.items():
+        print(f'=== {store} - {cat} ===')
+        for i in items[:5]:
+            was = i.get('priceBefore')
+            drop = f' (was \${was})' if was else ''
+            bundle = ' [BUNDLE]' if i.get('isBundle') in (1, True) else ''
+            print(f'  {i["title"]} | \${i["price"]}{drop}{bundle} | {i.get("genre","?")}')
+"
+```

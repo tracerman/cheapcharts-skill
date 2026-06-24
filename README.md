@@ -30,6 +30,8 @@ It wraps the [CheapCharts public API](https://www.cheapcharts.com/us/ai) (no aut
 
 - A complete `SKILL.md` manifest with all endpoints, recipes, and pitfalls
 - A parallel `atl_check.py` script that finds ATL deals in ~12 seconds for 50 items
+- Support for purchase (`buymovies`) and rental (`rentalmovies`) price lookups
+- Filterable by genre, max price, release year, quality, and IMDb/Rotten Tomatoes rating
 - A real example deal report from today
 - A Claude Code slash command
 - A GitHub Actions smoke test
@@ -140,6 +142,14 @@ Issues and PRs welcome. The most useful contributions:
 - More robust ATL detection (current `priceHdIsLowest` flag is the most reliable signal we have)
 - Multi-store parallelization (bundled script is iTunes-only by default)
 - Real examples in `examples/`
+
+## Links
+
+- CheapCharts website: https://www.cheapcharts.com
+- CheapCharts blog: https://www.cheapcharts.com/blog
+- CheapCharts on Twitter/X: @CheapCharts_US
+- CheapCharts iOS app: [App Store](https://apps.apple.com/app/cheapcharts/id772046134)
+- CheapCharts Android app: [Google Play](https://play.google.com/store/apps/details?id=com.cheapcharts.app)
 
 ## License
 

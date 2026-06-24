@@ -1,7 +1,7 @@
 ---
 name: cheapcharts
 description: "Use when looking up digital movie/TV show prices, deals, charts, or recommendations across iTunes, Amazon, Vudu, and Google Play. Free public API, no auth required."
-version: 1.6.0
+version: 2.0.0
 author: tracerman (built with love and coffee)
 license: MIT
 metadata:
@@ -13,7 +13,7 @@ metadata:
 
 # CheapCharts API Skill
 
-> A free, public-API price tracker for digital movies and TV shows across iTunes (Apple TV), Amazon Prime Video, Vudu, and Google Play. No authentication, no rate limits.
+> A free, public-API price tracker for digital movies and TV shows across iTunes (Apple TV), Amazon Prime Video, Vudu, and Google Play. No authentication, no rate limits. Parallel calls are safe - the `atl_check.py` script uses 8 concurrent DetailData workers.
 
 **Repo:** https://github.com/tracerman/cheapcharts-skill
 **API Base URL:** `https://buster.cheapcharts.de/v1/gptapi/`
@@ -64,16 +64,18 @@ The full "today's drops" recipe with Python verification is in the Workflow Reci
 
 ## API Endpoints
 
+> **Common parameters:** Charts, Deals, Prices, and Recommendations share common parameters (`action`, `store`, `country`, `itemType`, `imdbRating`, `rottenTomatoesRating`). Search and Topseller have their own parameter sets (see their sections below).
+
 ### 1. Search - `Search.php`
 
 Find items by title. Use this FIRST when you only have a title and need the IMDb ID.
 
 **Required:** `action=search`, `query=<title>` (or `searchTerm=<title>` - alias, per vendor's llms.txt)
-**Optional:** `store=itunes` (default), `country=us` (default), `itemType=all` (default), `limit=20` (max 20), `offset=0`
+**Optional:** `store=itunes` (default), `country=us` (default), `itemType=all` (default), `limit=20` (default 20, max 20), `offset=0 (paging offset for results beyond limit)`
 
 *(see [RECIPES.md](RECIPES.md))*
 
-Returns flat list: `{"status":"success","results":[...items...]}`. Each item includes `imdbId` (if available), `mediaType` (movies/seasons/ebooks/audiobooks/albums), `priceFollowUpItemType` (use this value as `itemType` for Prices API), and `cheapChartsProductPageUrl`.
+Returns flat list: `{"status":"success","results":[...items...]}`. Each item includes `imdbId` (if available), `mediaType`, `itemType`, `priceFollowUpItemType`, `store`, `country`, `cheapChartsProductPageUrl`, `title`, `artist`, `releaseDate`, `releaseYear`, `currency`, `price`, `currentPrice`, `has4K`, `hdrFormat`, `imdbRating`, `rottenTomatoesRating` (see Common Item Fields table for full details).
 
 ### 2. Charts - `Charts.php`
 
@@ -91,7 +93,7 @@ Returns: `{"status":"success","results":{"buymovies":[...]}}`. Items include `ra
 Current deals and price drops. Best for bargain hunting.
 
 **Required:** `action=getDeals`, `store`, `country`, `itemType` (buymovies or seasons)
-**Optional:** `genre=All`, `quality=hd4k`, `sort=latestPricechange`, `maxPrice`, `releaseYear` (format: `2020-2025` - single year like `2026-2026` works too), `limit`, `imdbRating` (min rating, e.g. `imdbRating=7`), `rottenTomatoesRating` (min score, e.g. `rottenTomatoesRating=80`), `has4K=1` (DOES NOT WORK - ignored, filter client-side instead)
+**Optional:** `genre=All`, `quality=hd4k`, `sort=latestPricechange`, `maxPrice`, `releaseYear` (format: `2020-2025` - single year like `2026-2026` works too; default: all years), `limit`, `imdbRating` (min rating 0-10, default 0 = no filter, e.g. `imdbRating=7`), `rottenTomatoesRating` (min score 0-100, default 0 = no filter, e.g. `rottenTomatoesRating=80`), `has4K=1` (DOES NOT WORK - ignored, filter client-side instead)
 
 **Sort options:** `latestPricechange` (default), `price`, `greatestSavings`, `greatestPercentageSavings`, `popularity`, `alphabetical`, `releaseDate` (ascending only - see Pitfall #11)
 
@@ -105,7 +107,7 @@ Returns: `{"status":"success","results":{"buymovies":[...]}}`. Items include `pr
 
 Look up current prices for specific titles by IMDb ID.
 
-**Required:** `action=getPrices`, `store`, `country`, `itemType=buymovies`, `imdbIDs` (comma-separated, e.g. `tt0468569,tt2911666`)
+**Required:** `action=getPrices`, `store`, `country`, `itemType=buymovies`, `imdbIDs` (note: llms.txt Common Parameters list `seasons` as valid for Prices, but the Prices-specific param table and empirical testing confirm only `buymovies` works - see Pitfall #7) (comma-separated, e.g. `tt0468569,tt2911666`)
 
 *(see [RECIPES.md](RECIPES.md))*
 
@@ -118,20 +120,22 @@ Curated recommendations, filtered by genre and quality.
 **Required:** `action=getRecommendations`, `store`, `country`, `itemType` (buymovies or seasons)
 **Optional:** `genre=All`, `quality=hd4k`, `limit`, `imdbRating`, `rottenTomatoesRating`
 
+**Note:** llms.txt lists `imdbRating`/`rottenTomatoesRating` as supported here, but empirical testing shows they are silently ignored on Recommendations (Pitfall #23). Use Deals with `sort=greatestSavings` + rating filters instead.
+
 *(see [RECIPES.md](RECIPES.md))*
 
 Returns: `{"status":"success","results":{"buymovies":[...]}}`. Items may include `description` field.
 
 ### 6. Topseller - `Topseller.php`
 
-Top sellers across multiple stores. Does NOT require `itemType`.
+Top sellers across multiple stores. Does NOT require `itemType`, `imdbRating`, or `rottenTomatoesRating` (unlike other endpoints).
 
 **Required:** `action=getTopsellerForStartpage`, `country`, `store` (comma-separated, e.g. `itunes,amazon,vudu,googlePlay`)
-**Optional:** `maxItemCount=5` (per store per category)
+**Optional:** `maxItemCount=5` (default 5, per store per category)
 
 *(see [RECIPES.md](RECIPES.md))*
 
-Returns: `{"status":"success","results":{"itunes":{"movies":[...],"seasons":[...]},"amazon":{...}}}`. Grouped by store, then by movies/seasons.
+Returns: `{"status":"success","results":{"itunes":{"movies":[...],"seasons":[...]},"amazon":{...}}}`. Grouped by store, then by movies/seasons. Field availability varies by store - `has4K`, `hasAtmos`, `hdrFormat`, `isMovieBundle` only appear for iTunes items (see Pitfall #3).
 
 ### 7. DetailData (Internal) - `DetailData.php`
 
@@ -200,7 +204,7 @@ Returns: `{"results":{"seasons":{...}}}` (key matches the `itemType` you passed)
 | `seasons` | Season metadata only | Search only |
 | `all` | All media types (movies, seasons, ebooks, audiobooks, albums) | Search only |
 
-**Purchase vs rental (verified 2026-06-23 against vendor's llms.txt):** The Prices endpoint's `itemType` parameter accepts `buymovies` (purchase price) or `rentalmovies` (rental price). Rentals are typically 30 days to start watching and 48 hours to finish once started. The Search endpoint can return either type — the `priceFollowUpItemType` field tells you which one to use in the follow-up Prices call. The `atl_check.py` script only handles `buymovies`; for rental-specific deals, query Prices directly with `itemType=rentalmovies`.
+**Purchase vs rental (empirically discovered, NOT in current llms.txt):** The Prices endpoint's `itemType` parameter accepts `buymovies` (purchase price) or `rentalmovies` (rental price). Rentals are typically 30 days to start watching and 48 hours to finish once started. The Search endpoint can return either type — the `priceFollowUpItemType` field tells you which one to use in the follow-up Prices call. The `atl_check.py` script supports `--type rentalmovies` for batch ATL checks on rental deals. Note: the official llms.txt only documents `buymovies` and `seasons` as valid itemType values — `rentalmovies` was discovered empirically and works on Deals and Prices endpoints.
 
 ### Genre
 
@@ -208,7 +212,7 @@ Returns: `{"results":{"seasons":{...}}}` (key matches the `itemType` you passed)
 
 `All` (no filter), `ActionAdventure`, `Comedy`, `Docus` (iTunes only), `Drama`, `MadeForTV`, `Horror`, `Classical`, `Romance`, `Independent`, `KidsFamily`, `MusicDocumentation`, `SciFiFantasy`, `Sport`, `Thriller`, `Western`, `Anime`, `Musicals`
 
-Unknown values silently fall back to "All" - they do NOT error (Pitfall #22).
+Unknown values silently fall back to "All" - they do NOT error (Pitfall #22). Not all genres are available for all stores - non-iTunes stores may silently ignore unsupported genre values.
 
 **TV Seasons (`itemType=seasons`)** - the `genre` parameter is broken on Deals, Charts, and Recommendations (Pitfall #21). Omit it and filter by title client-side.
 
@@ -230,7 +234,7 @@ Unknown values silently fall back to "All" - they do NOT error (Pitfall #22).
 | `artist` | yes | Director (movies) or creator (TV) - may be empty string |
 | `cheapChartsProductPageUrl` | yes | Direct link to CheapCharts page - **always include this when showing results** |
 | `currency` | yes | Currency code (USD, EUR, etc.) |
-| `price` | yes | Current purchase price |
+| `price` | yes | Current HD purchase price (reflects quality parameter default; per llms.txt) |
 | `priceBefore` | no | Previous price before last change |
 | `releaseDate` | yes | Original release date |
 | `genre` | yes | Primary genre name (human-readable, e.g. "Action & Adventure") |
@@ -241,11 +245,16 @@ Unknown values silently fall back to "All" - they do NOT error (Pitfall #22).
 | `hasAtmos` | no | iTunes only - Dolby Atmos available |
 | `hdrFormat` | no | iTunes only - `No HDR`, `Dolby Vision`, `HDR10+`, `HDR10` |
 | `isMovieBundle` | no | iTunes only - is this a movie bundle/collection |
+| `isBundle` | no | Whether this is a season/collection bundle (Topseller seasons, DetailData) |
 | `description` | no | Short synopsis (if available) |
 | `rank` | no | Chart rank position (Charts endpoint only) |
 | `mediaType` | Search only | movies, seasons, ebooks, audiobooks, albums |
-| `priceFollowUpItemType` | Search only | Use this as `itemType` for Prices API follow-up (can be `buymovies` OR `rentalmovies` per official llms.txt) |
+| `itemType` | Search only | Same media category repeated for agent compatibility |
+| `store` | Search only | Store used for the search |
+| `country` | Search only | Country used for the search |
+| `priceFollowUpItemType` | Search only | Use this as itemType for Prices API follow-up. Can be `buymovies` OR `rentalmovies` (rentalmovies empirically discovered, NOT in current llms.txt) |
 | `currentPrice` | Search only | Alias for `price` in Search responses |
+| `releaseYear` | no | Release year, derived from releaseDate when available (Search responses) |
 
 ## Endpoint Decision Tree
 
@@ -460,10 +469,10 @@ Prompt: |
 
 ## CheapCharts Games (related but not in scope)
 
-CheapCharts also tracks video game prices at **games.cheapcharts.info** (Xbox, PlayStation, Nintendo Switch). It is a separate product: separate website, separate iOS/Android apps, and **no public API** (verified 2026-06-23 — all four GPT API endpoints and DetailData only serve movies/TV/books, not games).
+CheapCharts also tracks video game prices at **games.cheapcharts.com** (Xbox, PlayStation, Nintendo Switch). It is a separate product: separate website, separate iOS/Android apps, and **no public API** (verified 2026-06-23 — all four GPT API endpoints and DetailData only serve movies/TV/books, not games).
 
 **If a user asks about game deals:** point them to the website and the mobile apps:
-- Website: https://games.cheapcharts.info
+- Website: https://games.cheapcharts.com
 - iOS app: id1622193150
 - Android app: com.cheapcharts.cheapcharts_games
 
