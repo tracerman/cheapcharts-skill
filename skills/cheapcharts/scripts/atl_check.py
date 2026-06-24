@@ -149,7 +149,9 @@ def format_atl_line(a):
     atl_label = "HD" if a.get("is_atl_hd") and not a.get("is_atl_sd") else (
         "SD" if a.get("is_atl_sd") and not a.get("is_atl_hd") else "BOTH"
     )
-    return f"  [{atl_label}] {a['title']} | ${price}{save_str} | changed {a.get('change_date', '?')} | {a['url']}"
+    store_url = a.get("store_url")
+    url_part = f" | buy: {store_url}" if store_url else ""
+    return f"  [{atl_label}] {a['title']} | ${price}{save_str} | changed {a.get('change_date', '?')}{url_part} | {a['url']}"
 
 
 def check_single_title(title, store=DEFAULT_STORE, country=DEFAULT_COUNTRY):
@@ -171,6 +173,16 @@ def check_single_title(title, store=DEFAULT_STORE, country=DEFAULT_COUNTRY):
     print(f"    ATL (IsLowest):      hd={node.get('priceHdIsLowest')} sd={node.get('priceSdIsLowest')}")
     print(f"    Current-sale floor (IsBest): hd={node.get('priceHdIsBest')} sd={node.get('priceSdIsBest')}")
     print(f"    Last change: {node.get('priceHdLastChangeDate') or node.get('priceSdLastChangeDate')}")
+    # Store links (from DetailData)
+    product_url = node.get("productPageUrl")
+    itunes_url = node.get("iTunesUrl")
+    cc_url = node.get("cheapChartsProductPageUrl")
+    if product_url:
+        print(f"    Buy on Apple TV: {product_url}")
+    if itunes_url and itunes_url != product_url:
+        print(f"    iTunes: {itunes_url}")
+    if cc_url:
+        print(f"    Price history: {cc_url}")
     if is_atl(node):
         print("    --> Currently at ATL")
     return 0
@@ -259,6 +271,7 @@ def check_batch(item_type, store=DEFAULT_STORE, country=DEFAULT_COUNTRY, limit=D
                 "is_atl_hd": node.get("priceHdIsLowest") == 1,
                 "is_atl_sd": node.get("priceSdIsLowest") == 1,
                 "url": d.get("cheapChartsProductPageUrl"),
+                "store_url": node.get("productPageUrl") or node.get("iTunesUrl"),
             })
 
     if output_json:
