@@ -124,9 +124,8 @@ cheapcharts-skill/
         ├── RECIPES.md                 # copy-pasteable command recipes
         ├── README.md                   # per-skill landing page
         ├── examples/
-        │   ├── demo-2026-06-23.png     # historical ATL-only demo
-        │   ├── demo-atl-only-2026-06-24.png    # ATL-only mode demo
-        │   └── demo-deals-2026-06-24.png       # default deals+ATL flag demo
+        │   ├── demo-deals-2026-06-24.png      # default mode (all deals, ATL flag)
+        │   └── demo-atl-only-2026-06-24.png   # --atl-only mode (v2.x behavior)
         ├── scripts/
         │   └── deals.py                # the parallel deal/ATL finder
         └── claude-code/

@@ -52,7 +52,7 @@ Query the CheapCharts public API for the latest price drops on iTunes/Apple TV, 
 The complete workflow with exact curl commands, all known pitfalls (15+), and the full presentation guide is in the parent skill's SKILL.md. This slash command is a thin wrapper that:
 
 1. Reads the user's request to extract `type`, `store`, `title`, `max`, `since`, `genre`, `max_price`
-2. Calls the bundled `scripts/atl_check.py` with the right flags
+2. Calls the bundled `scripts/deals.py` with the right flags
 3. Formats the result as a markdown table
 
 If the user wants to invoke the underlying scripts directly, point them at the parent repo: https://github.com/tracerman/cheapcharts-skill

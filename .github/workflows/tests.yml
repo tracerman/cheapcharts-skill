@@ -1,4 +1,4 @@
-name: Test atl_check.py
+name: Test deals.py
 
 on:
   push:
@@ -19,12 +19,16 @@ jobs:
           python-version: "3.11"
       - name: Smoke test - script runs and exits 0 or 1
         run: |
-          python skills/cheapcharts/scripts/atl_check.py --type buymovies --limit 5
-          # Script exits 0 on success, 1 on "no ATL titles found"
+          python skills/cheapcharts/scripts/deals.py --type buymovies --limit 5
+          # Script exits 0 on success, 1 on "no deals found"
           # Either is acceptable; just verify it parses args and runs.
       - name: JSON output mode
         run: |
-          python skills/cheapcharts/scripts/atl_check.py --type buymovies --limit 3 --json | python -c "import json, sys; data=json.load(sys.stdin); assert isinstance(data, list); print(f'OK: {len(data)} items')"
+          python skills/cheapcharts/scripts/deals.py --type buymovies --limit 3 --json | python -c "import json, sys; data=json.load(sys.stdin); assert isinstance(data, list); print(f'OK: {len(data)} items')"
       - name: Single title lookup
         run: |
-          python skills/cheapcharts/scripts/atl_check.py --title "Bernie"
+          python skills/cheapcharts/scripts/deals.py --title "Bernie"
+      - name: ATL-only mode (v2.x compat)
+        run: |
+          python skills/cheapcharts/scripts/deals.py --type buymovies --limit 30 --atl-only --min-savings 3 | head -3
+          # Smoke-test that the --atl-only flag works (v2.x behavior preserved)

@@ -438,7 +438,7 @@ def main():
     p = argparse.ArgumentParser(
         description="CheapCharts All-Time-Low (ATL) checker",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="Combined filters example: python atl_check.py --genre Horror --max-price 4.99 --min-savings 3"
+        epilog="Combined filters example: python deals.py --genre Horror --max-price 4.99 --min-savings 3"
     )
     p.add_argument("--title", help="Check a single title (resolves via Search)")
     p.add_argument("--type", choices=("buymovies", "seasons", "rentalmovies"), default="buymovies",
