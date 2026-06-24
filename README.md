@@ -1,8 +1,8 @@
-# CheapCharts Skill (by tracerman)
+# CheapCharts Skill
 
-> A free, public-API price tracker for digital movies and TV shows on iTunes/Apple TV, Amazon, Vudu, and Google Play - with a parallel ATL checker that scans 50 drops in ~12s (the website only shows the ATL badge on individual title pages, so bulk checking means 50 clicks).
+> Agent skill for finding digital movie and TV deals that are actually worth buying, with parallel all-time-low checks across the stores CheapCharts tracks.
 
-*Built by [tracerman](https://github.com/tracerman) with love and coffee.*
+CheapCharts shows price drops. This skill checks whether a drop is a true historical low, filters out weak or inflated discounts, and gives an agent a clean answer to questions like "what noir is worth buying on Apple TV today?"
 
 <p>
   <a href="https://github.com/tracerman/cheapcharts-skill"><img src="https://img.shields.io/github/stars/tracerman/cheapcharts-skill?style=for-the-badge&logo=github&color=181717" alt="GitHub stars"></a>
@@ -12,95 +12,132 @@
   <br>
   <a href="https://github.com/tracerman/cheapcharts-skill/issues"><img src="https://img.shields.io/github/issues/tracerman/cheapcharts-skill?style=for-the-badge&color=blue" alt="Issues"></a>
   <a href="https://github.com/tracerman/cheapcharts-skill/commits/main"><img src="https://img.shields.io/github/last-commit/tracerman/cheapcharts-skill?style=for-the-badge&color=blue" alt="Last commit"></a>
-  <a href="https://skills.sh/"><img src="https://img.shields.io/badge/skills.sh-install-blueviolet?style=for-the-badge" alt="skills.sh install"></a>
+  <a href="https://www.skills.sh/tracerman/cheapcharts-skill"><img src="https://img.shields.io/badge/skills.sh-install-blueviolet?style=for-the-badge" alt="skills.sh install"></a>
   <img src="https://img.shields.io/badge/python-3.9%2B-blue?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.9+">
 </p>
+
+## The problem it solves
+
+CheapCharts' deal listings tell you a title dropped in price. They don't tell you whether that price is the lowest it has *ever* been.
+
+The reason is structural. The deals endpoints (`buymovies`, `rentalmovies`) return only price and title, with no historical data attached. All-time-low status lives in a separate `DetailData` endpoint, surfaced per title rather than as a bulk verdict across a deal list. So to know whether 50 of today's drops are at the historical floor or just a routine sale, you'd have to check 50 titles one at a time.
+
+This skill hits that same `DetailData` endpoint in parallel and hands you the verdict for the whole batch in about 12 seconds. It also throws out the noise: manipulated "was" prices and sub-dollar changes don't count as deals.
+
+So instead of "here's a wall of stuff that's cheaper today," you get "here's what's actually at its lowest price ever, today."
+
+## What you can ask
+
+Installed as a skill, you don't touch the CLI. You ask, and the agent runs the script and reads back the result:
+
+- "What Apple TV movies are at an all-time low today?"
+- "Has *The Thing* ever been cheaper than it is right now?"
+- "Any horror under $5 that's actually at its lowest price ever?"
+- "Best classic noir on Apple TV with a real deal on it right now?"
+
+The script emits JSON for cron pipelines or formatted tables for humans, so the same skill drives both a scheduled "post today's ATL drops" job and an ad-hoc question.
 
 ## Demo
 
 ![Apple TV drops on 2026-06-23](skills/cheapcharts/examples/demo-2026-06-23.png)
 
-The screenshot above is real output - the script ran against the live CheapCharts API on 2026-06-23 and verified each drop's `priceHdLastChangeDate` against the internal `DetailData` endpoint. ATL rows are highlighted in green; non-ATL rows show a `-` in the ATL column.
+Real output from a 2026-06-23 run against the live CheapCharts API, with each drop's `priceHdLastChangeDate` verified against the internal `DetailData` endpoint. ATL rows are highlighted in green; non-ATL rows show a `-` in the ATL column. IMDb and Rotten Tomatoes scores appear only for individual movies. Bundles, TV seasons, and complete-series bundles show `-`, because CheapCharts doesn't carry ratings for those.
 
-## What is this
+## Example output
 
-This is an **agent skill** that lets any AI agent (Hermes, Claude Code, OpenAI Codex, Cursor, etc.) look up movie and TV show prices across all four major US digital stores, and check whether a given drop is at the historical floor (all-time low / ATL).
+The script prints one line per title currently at its all-time low. `[BOTH]` means the price is the floor in both HD and SD; `[HD]` or `[SD]` means just one.
 
-It wraps the [CheapCharts public API](https://www.cheapcharts.com/us/ai) (no auth required; `DetailData` is rate-sensitive at high concurrency, hence the 12-worker cap) and includes:
+```
+$ python scripts/atl_check.py --type buymovies --min-savings 5 --limit 40
 
-- A complete `SKILL.md` manifest with all endpoints, recipes, and pitfalls
-- A parallel `atl_check.py` script that finds ATL deals in ~12 seconds for 50 items
-- Support for purchase (`buymovies`) and rental (`rentalmovies`) price lookups
-- Filterable by genre, max price, release year, quality, and IMDb/Rotten Tomatoes rating
-- A real example deal report from today
-- A Claude Code slash command
-- A GitHub Actions smoke test
+=== 17 buymovies currently at ATL (out of 40 checked) ===
+
+  [BOTH] Mystery Science Theater 3000: The Gizmoplex Collection | $9.99 (was $99.99, save $90.00 / 90%) | changed 2026-06-23
+  [BOTH] Rage In The Cage: 20-Film Collection | $19.99 (was $89.99, save $70.00 / 78%) | changed 2026-06-23
+  [BOTH] Audrey Hepburn 7-Movie Collection | $14.99 (was $69.99, save $55.00 / 79%) | changed 2026-06-23
+  [BOTH] 15-Film Pride Pack | $14.99 (was $69.99, save $55.00 / 79%) | changed 2026-06-23
+  [BOTH] Illumination's Ultimate 11-Movie Collection | $49.99 (was $99.99, save $50.00 / 50%) | changed 2026-06-23
+  ...
+```
+
+Each line also carries an Apple TV buy link and a CheapCharts price-history link, trimmed above for width.
+
+Combined filters (genre + max price + min savings):
+
+```
+$ python scripts/atl_check.py --genre Horror --max-price 4.99 --min-savings 3 --limit 30
+
+=== 30 buymovies currently at ATL (out of 30 checked) [genre=Horror, maxPrice=$4.99] ===
+
+  [BOTH] Human Resources | $1.99 (was $14.99, save $13.00 / 87%) | changed 2023-05-29
+  [BOTH] Demons Never Die | $1.99 (was $12.99, save $11.00 / 85%) | changed 2023-04-18
+  [BOTH] Monster on a Plane | $2.99 (was $12.99, save $10.00 / 77%) | changed 2025-08-14
+  [BOTH] The Housemaid (2018) | $4.99 (was $14.99, save $10.00 / 67%) | changed 2025-05-02
+  ...
+```
+
+The table in the demo screenshot above is this same data after an agent formats it into a report. The raw script output is these lines.
+
+See [`skills/cheapcharts/examples/today-2026-06-23.md`](skills/cheapcharts/examples/today-2026-06-23.md) for a full real-world report.
+
+## How ATL detection works
+
+This is the part that separates a real all-time low from a sale that just looks good:
+
+- The deals endpoints return price and title only. The ATL signal is not in them.
+- `DetailData` carries `priceHdIsLowest`, the one ATL flag the API exposes directly. The script hits it in parallel (8 concurrent workers), roughly 12 seconds for 50 items versus about 150 sequential.
+- Fake drops are filtered out: manipulated `priceBefore` baselines and changes under $1.
+- It catches what the site misses. CheapCharts flags an all-time low the first time a title hits the floor, but does not surface concurrent ATLs. A price sitting at the floor today that was already at the floor last week won't be flagged on the site. The skill checks the live `DetailData` state, so it sees it.
+
+## Supported stores
+
+| Store | Country support | Coverage |
+|---|---|---|
+| iTunes / Apple TV | us, de, gb, fr, au, ca, at, ch, es, pt, ru, jp, tr, pl, in, cn | Full. The default, and where the script works best. |
+| Amazon | us, de | Via `--store amazon`. Batch mode often returns a server-side error; single-title lookups work but data is sparser than iTunes. |
+| Vudu | us | Via `--store vudu`. Data is sparser than iTunes. |
+| Google Play | us | Via `--store googlePlay`. Data is sparser than iTunes. |
+
+iTunes and Apple TV are the same underlying catalog (Apple rebranded iTunes Movies & TV Shows to the Apple TV app in 2019). The script defaults to iTunes because that's where CheapCharts has the most complete catalog and the most reliable deals endpoint. For non-iTunes stores, prefer `--title` lookups over batch mode.
+
+## Features
+
+- A parallel `atl_check.py` checker that verifies ATL across a deal batch in ~12s for 50 items (8 concurrent `DetailData` workers)
+- Purchase (`buymovies`), rental (`rentalmovies`), and TV (`seasons`) lookups
+- Script filters for genre, max price, release year, and quality (IMDb / Rotten Tomatoes filtering exists on the API but isn't a script flag, and ratings only exist for individual movies, not bundles or TV seasons)
+- JSON output for cron pipelines, formatted tables for humans
+- Wraps the free CheapCharts API, currently unauthenticated, so no API key is required
+- A complete `SKILL.md` manifest with endpoints, recipes, and pitfalls
+- A Claude Code slash command and a GitHub Actions smoke test
+- Digital movie and TV deals only; physical media (Blu-ray, DVD) is out of scope
 
 ## Install
 
-The skill lives at [`skills/cheapcharts/`](skills/cheapcharts/). Install it with whatever skill tool your agent uses:
+Install with whatever tool your agent uses. The skill lives at [`skills/cheapcharts/`](skills/cheapcharts/).
 
-**Vercel / skills.sh (any agent):**
-```bash
-npx skills add tracerman/cheapcharts-skill
-# or just this one skill:
-npx skills add tracerman/cheapcharts-skill --skill cheapcharts
-```
+| Platform | Install |
+|---|---|
+| skills.sh (any agent) | `npx skills add tracerman/cheapcharts-skill` |
+| Hermes Agent | `hermes skills install tracerman/cheapcharts-skill` |
+| Claude Code | Copy the slash command into `~/.claude/commands/` (see below), then type `/cheapcharts` |
+| Claude Desktop | Upload the [release zip](https://github.com/tracerman/cheapcharts-skill/releases/download/v2.2.0/cheapcharts-claude-desktop.zip) via Settings > Features > Skills |
+| Plain Python | Clone and run `atl_check.py` directly (see below) |
 
-**Hermes Agent:**
-```bash
-hermes skills install tracerman/cheapcharts-skill
-```
-
-**Claude Code (slash command):**
+**Claude Code slash command:**
 ```bash
 mkdir -p ~/.claude/commands
 curl -L https://raw.githubusercontent.com/tracerman/cheapcharts-skill/main/skills/cheapcharts/claude-code/cheapcharts.md \
   -o ~/.claude/commands/cheapcharts.md
 ```
-Then type `/cheapcharts` in Claude Code.
 
-**Claude Desktop (upload skill zip):**
-1. Download [`cheapcharts-claude-desktop.zip`](https://github.com/tracerman/cheapcharts-skill/releases/download/v2.2.0/cheapcharts-claude-desktop.zip)
-2. Open Claude Desktop > Settings > Features > Skills
-3. Click "Upload" and select the zip file
-4. Requires Pro/Max/Team/Enterprise plan with code execution enabled
+**Claude Desktop** requires a Pro/Max/Team/Enterprise plan with code execution enabled. Download [`cheapcharts-claude-desktop.zip`](https://github.com/tracerman/cheapcharts-skill/releases/download/v2.2.0/cheapcharts-claude-desktop.zip), then Settings > Features > Skills > Upload.
 
-**Plain Python (no agent):**
+**Plain Python** (no agent), Python 3.9+, standard library only:
 ```bash
 git clone https://github.com/tracerman/cheapcharts-skill
 cd cheapcharts-skill/skills/cheapcharts
 python scripts/atl_check.py --title "Fight Club"
 ```
-Requires Python 3.9+ (uses stdlib only).
-
-## Quick example
-
-```
-$ python scripts/atl_check.py --type buymovies --min-savings 5
-
-TITLE                            NOW     WAS     SAVE    ATL  IMDb  CHANGED
-Rage In The Cage: 20-Film...    $19.99  $89.99  $70.00  ATL  -     2026-06-23
-15-Film Pride Pack              $14.99  $69.99  $55.00  ATL  -     2026-06-23
-A Better Tomorrow Trilogy       $14.99  $39.99  $25.00  -    -     2026-06-23
-Bernie                           $4.99  $12.99   $8.00  ATL  -     2026-06-23
-Werner Herzog: Radical Dreamer   $4.99   $9.99   $5.00  ATL  -     2026-06-23
-...
-```
-
-Combined filters (genre + max price + min savings):
-
-```
-$ python scripts/atl_check.py --genre Horror --max-price 4.99 --min-savings 3
-
-=== 9 buymovies currently at ATL (out of 10 checked) [genre=Horror, maxPrice=$4.99] ===
-
-  [BOTH] Human Resources | $1.99 (was $14.99, save $13.00) | changed 2023-05-29
-  [BOTH] The Housemaid (2018) | $4.99 (was $14.99, save $10.00) | changed 2025-05-02
-  ...
-```
-
-See [`skills/cheapcharts/examples/today-2026-06-23.md`](skills/cheapcharts/examples/today-2026-06-23.md) for a full real-world report.
 
 ## Repo structure (skill package)
 
@@ -118,48 +155,15 @@ cheapcharts-skill/
         └── claude-code/cheapcharts.md # slash command
 ```
 
-This is the canonical [Agent Skills](https://agentskills.io/specification) layout: a "skill package" repo where each skill lives in its own subdirectory under `skills/`. Tools like `npx skills add` and `hermes skills install` understand this layout.
-
-## Why this exists
-
-CheapCharts' website shows an ATL badge the first time a title hits the historical floor, but it does not surface concurrent ATLs - i.e. it will not tell you that a price currently sitting at the floor *was already at the floor last week*. Its deals-listing endpoints (`buymovies`, `rentalmovies`) only return price+title, with no `DetailData` fields, so you can't see which of today's drops are at the floor without checking each one. This skill wraps the same `DetailData` endpoint the site uses and hits it in parallel, so you can see exactly which of today's drops are at the historical floor and which are just typical sales, in ~12s for 50 items instead of 50 page loads. It gives you a script that:
-
-- Pulls the latest deals from CheapCharts (iTunes works best; Amazon/Vudu/Google Play supported but sparser)
-- Hits DetailData in parallel (12 workers, ~12s for 50 items)
-- Tells you which drops are at the historical floor (`ATL`) vs. just a typical sale
-- Skips "fake drops" (manipulated `priceBefore` baselines, <$1 changes)
-- Outputs JSON for cron pipelines or pretty tables for humans
-
-## Supported stores
-
-| Store | Country support | Coverage |
-|---|---|---|
-| iTunes / Apple TV | us, de, gb, fr, au, ca, at, ch, es, pt, ru, jp, tr, pl, in, cn | Full - this is the default and where the script works best |
-| Amazon | us, de | Supported via `--store amazon`; batch mode often returns a server-side error, single-title lookups work but data is sparser than iTunes |
-| Vudu | us | Supported via `--store vudu`; data is sparser than iTunes |
-| Google Play | us | Supported via `--store googlePlay`; data is sparser than iTunes |
-
-iTunes and Apple TV are used interchangeably - same underlying catalog. Apple rebranded iTunes Movies & TV Shows to the Apple TV app in 2019. The script defaults to iTunes because that's where CheapCharts has the most complete catalog and the most reliable Deals endpoint. For non-iTunes stores, prefer `--title` lookups over batch mode.
-
-## Install on every major agent platform
-
-| Platform | Install |
-|---|---|
-| Vercel / skills.sh (any agent) | `npx skills add tracerman/cheapcharts-skill` |
-| Hermes Agent | `hermes skills install tracerman/cheapcharts-skill` |
-| Claude Code (slash command) | Copy `skills/cheapcharts/claude-code/cheapcharts.md` to `~/.claude/commands/` |
-| Claude Desktop (upload) | Download [zip](https://github.com/tracerman/cheapcharts-skill/releases/download/v2.2.0/cheapcharts-claude-desktop.zip), upload via Settings > Features > Skills |
-| Plain Python | `git clone … && python skills/cheapcharts/scripts/atl_check.py --title "Bernie"` |
-
-The skill package follows the canonical [Agent Skills spec](https://agentskills.io/specification): one repo, one or more skill subdirectories under `skills/`, each with a `SKILL.md` and optional `scripts/`, `references/`, `assets/`. Tools like `npx skills` and `hermes skills install` both understand this layout.
+This is the canonical [Agent Skills](https://agentskills.io/specification) layout: one repo, one or more skill subdirectories under `skills/`, each with a `SKILL.md` and optional `scripts/`, `references/`, `assets/`. Tools like `npx skills add` and `hermes skills install` understand this layout.
 
 ## Contributing
 
 Issues and PRs welcome. The most useful contributions:
 
-- New recipes for the SKILL.md / RECIPES.md
-- More robust ATL detection (`priceHdIsLowest` is the only ATL signal the API exposes directly; the only alternatives are deriving it from `priceHdLastChangeDate` + your own price history)
-- Multi-store parallelization (bundled script is iTunes-only by default)
+- New recipes for the `SKILL.md` / `RECIPES.md`
+- More robust ATL detection (`priceHdIsLowest` is the only ATL signal the API exposes directly; the only alternative is deriving it from `priceHdLastChangeDate` plus your own price history)
+- Multi-store parallelization (the bundled script is iTunes-only by default)
 - Real examples in `examples/`
 
 ## Links
@@ -173,3 +177,5 @@ Issues and PRs welcome. The most useful contributions:
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+*Built by [tracerman](https://github.com/tracerman) with love and coffee.*
