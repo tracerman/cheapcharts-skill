@@ -1,7 +1,7 @@
 ---
 name: cheapcharts
 description: "Use when looking up movie/TV show deals, charts, or recommendations on iTunes/Apple TV, Amazon, Vudu, or Google Play. The headline feature is parallel all-time-low (ATL) detection: a 50-item deal batch is verified against the DetailData endpoint in ~12 seconds, so you can tell which of today's drops are actually at the historical floor and which are routine sales. Fake discounts (manipulated baselines, sub-$1 changes) are filtered out."
-version: 2.3.0
+version: 2.3.1
 author: tracerman (built with love and coffee)
 license: MIT
 metadata:
@@ -61,6 +61,7 @@ The full "today's drops" recipe with Python verification is in the Workflow Reci
 | "What's selling the most" | Topseller | Cross-store top sellers |
 | "Search for [title]" | Search | Title-based search, returns metadata |
 | "Is [title] at its all-time low?" / "deals at ATL" / "lowest price ever" | **Deals + DetailData** | DetailData exposes `priceHdIsLowest` / `priceSdIsLowest` flags - no need to parse `priceHdEvolution` (see Recipe: "All-time low (ATL) deals"). Use `priceHdEvolution` only if you need the actual historical low dollar amount or change-date of the prior ATL. |
+| "What just came off a sale?" / "next drop targets" | **DetailData on a candidate set** | `priceBefore < price` means the title's most recent change was a price increase - the sale just ended. These are your highest-probability near-term drops and should be reported alongside active deals, not silently filtered out. See Pitfall #31. |
 
 ## API Endpoints
 
@@ -488,7 +489,7 @@ If CheapCharts ever releases a games API, add it as a separate script (e.g., `sc
 
 ## Presentation Guidelines
 
-1. **Always include `cheapChartsProductPageUrl`** when showing results to users - they can click through for full price history and details.
+1. **Always include `cheapChartsProductPageUrl`** when showing results to users - they can click through for full price history and details. For "buy now" links, also include `productPageUrl` (Apple TV) / `iTunesUrl` from DetailData - these are the direct store purchase links and are emitted as full URLs in the response. **Never reconstruct or guess these URLs** from `idInStore` (Pitfall #32). If the field is missing, omit the link and label the cell "no link" rather than fabricating.
 2. **Show savings** - calculate `priceBefore - price` and percentage off when `priceBefore` is present.
 3. **Highlight 4K/Atmos/HDR** info for iTunes items when relevant.
 4. **Show ratings** - IMDb and Rotten Tomatoes scores help users decide.
@@ -513,6 +514,13 @@ If CheapCharts ever releases a games API, add it as a separate script (e.g., `sc
    For multi-store comparisons, add a `Store` column between Title and Now. For seasonal/limited drops where change date is the same day for every row, drop the `Changed` column to save width on Telegram.
 
    When a row's `ATL` cell is `ATL`, consider prefixing the row with `**` (bold) in your message body - Telegram renders this and it visually flags the rare "lowest ever" deals among typical sales.
+
+   **"Sale ended" rows are reportable signal, not absence of data** (Pitfall #31). When `priceBefore < current price`, the title just came off a sale. Don't render these as empty `Now/Was/Save` cells - add a `Status` column with one of: `on sale`, `small sale`, `sale ended`, `stable`. For `sale ended` rows, show `Now` and `Was` (the prior low) and the savings *opportunity* if it dropped again ("would save $X.XX / N%"). These rows are the user's "set an alert on this" candidates. Example:
+
+   | Title | Now | Was | Status | Save | ATL | Buy |
+   |---|---:|---:|---|---:|:-:|---|
+   | Double Indemnity | $4.99 | $14.99 | on sale | $10.00 (67%) | ATL | [Buy](productPageUrl) |
+   | The Maltese Falcon | $12.99 | $4.99 | sale ended | - | - | [Buy](productPageUrl) |
 
 ## Common Pitfalls
 
@@ -576,6 +584,10 @@ If CheapCharts ever releases a games API, add it as a separate script (e.g., `sc
 
 30. **iTunes is the only store with reliable batch + complete catalog coverage.** The script accepts `--store` for all four stores, and single-title lookups work on Amazon/Vudu/Google Play, but the underlying CheapCharts data is sparser on those stores and the Deals endpoint returns a server-side error (HTTP 500, "There was an error handling the request") for many batch queries. Verified 2026-06-23: `--store amazon --limit 10` exits with code 2, while `--store itunes --limit 10` returns 80+ deals. For non-iTunes stores, prefer `--title <name>` lookups over batch mode, or fall back to Topseller (`gptapi/Topseller.php` with `store=itunes,amazon,vudu,googlePlay`) if you need cross-store batch data. Don't promise "all four stores" in agent reports without verifying the data for the specific title or genre.
 
+31. **`priceBefore < price` is signal, not noise - it means the sale just ended.** Verified 2026-06-24: on 20 classic-noir titles, 13 had `priceBefore < current price` (e.g. `now=$9.99, was=$4.99`) - the price went *up* at the last change, meaning the title was at $4.99 recently and the sale just expired. This is exactly the kind of title a user wants flagged as a "next drop target." **Do not render these rows as "-/--/--"** (treating absence of active savings as absence of useful info). The standard deal-report table (Presentation Guidelines #9) needs a fifth status - "sale ended" with the prior low price shown in the `Was` column - alongside "on sale" and "small sale." When you filter the Deals list down to "currently on sale," mention the sale-ended cohort separately so the user can decide whether to set an alert. The `priceHdDropIndicator` field tells you the direction without comparing `priceBefore` yourself: `1` = went up, `-1` = went down, `0` = unchanged.
+
+32. **Never fabricate store-direct URLs - the response always has them.** CheapCharts' DetailData response includes `productPageUrl` and `iTunesUrl` (the direct Apple TV purchase link) for every title, and `cheapChartsProductPageUrl` for the CheapCharts price-history page. These are emitted as full URLs - do not pattern-match or reconstruct them from `idInStore`. Verified 2026-06-24: a session attempted to reconstruct 20 plausible-looking Apple TV slugs by extending `idInStore` with a guessed `umc.cmc.<hash>` pattern; every one was a 404. The real URLs are in the response. The presentation guideline to "always include `cheapChartsProductPageUrl`" also applies to `productPageUrl`/`iTunesUrl` - both should appear in any "buy now" link in a deal report. If the field is missing from the response, render the link as the title in plain text (no link) and note "store URL unavailable" rather than guessing.
+
 ## Verification Checklist
 
 - [ ] Correct endpoint selected for user intent (see Quick Decision Guide)
@@ -595,6 +607,8 @@ If CheapCharts ever releases a games API, add it as a separate script (e.g., `sc
 - [ ] For ATL questions ("lowest ever", "all-time low"): used `priceHdIsLowest` / `priceSdIsLowest` from DetailData, NOT parsed `priceHdEvolution` (Pitfall #26)
 - [ ] For cron / monitoring jobs that need ATL alerts: consider running `python scripts/atl_check.py --json` and parsing the output, instead of inlining the DetailData workflow
 - [ ] For non-iTunes stores: prefer `--title` lookups over batch mode (Pitfall #30); don't claim "all four stores" coverage without per-title verification
+- [ ] For "what came off a sale / next drop" questions: included the `priceBefore < price` cohort with `Status: sale ended` rows (Pitfall #31), not just the active-deals cohort
+- [ ] Store-direct "Buy" links use `productPageUrl` / `iTunesUrl` from the response, not reconstructed from `idInStore` (Pitfall #32)
 
 ## Source
 
