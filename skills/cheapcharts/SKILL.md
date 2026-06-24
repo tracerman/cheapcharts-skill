@@ -1,7 +1,7 @@
 ---
 name: cheapcharts
-description: "Use when looking up movie/TV show deals, charts, or recommendations on iTunes/Apple TV, Amazon, Vudu, or Google Play. The headline feature is parallel all-time-low (ATL) detection: a 50-item deal batch is verified against the DetailData endpoint in ~12 seconds, so you can tell which of today's drops are actually at the historical floor and which are routine sales. Fake discounts (manipulated baselines, sub-$1 changes) are filtered out."
-version: 2.3.2
+description: "Use when looking up movie/TV show deals, charts, or recommendations on iTunes/Apple TV, Amazon, Vudu, or Google Play. The default output is a markdown table of all current deals sorted by latest price change, with an ATL column flagging which deals are at their historical low (parallel DetailData check, ~12 seconds for 50 items). Pass --atl-only to filter to ATL rows only. Fake discounts (manipulated baselines, sub-$1 changes) and multi-film bundles are filtered out by default. No auth or API key required."
+version: 3.0.0
 author: tracerman (built with love and coffee)
 license: MIT
 metadata:
@@ -13,7 +13,7 @@ metadata:
 
 # CheapCharts API Skill
 
-> A free, public-API price tracker for digital movies and TV shows across iTunes (Apple TV), Amazon Prime Video, Vudu, and Google Play. No authentication, no rate limits. Parallel calls are safe - the `atl_check.py` script uses 8 concurrent DetailData workers.
+> A free, public-API price tracker for digital movies and TV shows across iTunes (Apple TV), Amazon Prime Video, Vudu, and Google Play. No authentication, no rate limits. Parallel calls are safe - the `deals.py` script uses 8 concurrent DetailData workers.
 
 **Repo:** https://github.com/tracerman/cheapcharts-skill
 **API Base URL:** `https://buster.cheapcharts.de/v1/gptapi/`
@@ -205,7 +205,7 @@ Returns: `{"results":{"seasons":{...}}}` (key matches the `itemType` you passed)
 | `seasons` | Season metadata only | Search only |
 | `all` | All media types (movies, seasons, ebooks, audiobooks, albums) | Search only |
 
-**Purchase vs rental (empirically discovered, NOT in current llms.txt):** The Prices endpoint's `itemType` parameter accepts `buymovies` (purchase price) or `rentalmovies` (rental price). Rentals are typically 30 days to start watching and 48 hours to finish once started. The Search endpoint can return either type — the `priceFollowUpItemType` field tells you which one to use in the follow-up Prices call. The `atl_check.py` script supports `--type rentalmovies` for batch ATL checks on rental deals. Note: the official llms.txt only documents `buymovies` and `seasons` as valid itemType values — `rentalmovies` was discovered empirically and works on Deals and Prices endpoints.
+**Purchase vs rental (empirically discovered, NOT in current llms.txt):** The Prices endpoint's `itemType` parameter accepts `buymovies` (purchase price) or `rentalmovies` (rental price). Rentals are typically 30 days to start watching and 48 hours to finish once started. The Search endpoint can return either type — the `priceFollowUpItemType` field tells you which one to use in the follow-up Prices call. The `deals.py` script supports `--type rentalmovies` for batch rental deals. Note: the official llms.txt only documents `buymovies` and `seasons` as valid itemType values — `rentalmovies` was discovered empirically and works on Deals and Prices endpoints.
 
 ### Genre
 
@@ -324,7 +324,7 @@ Step 2 - Prices using IMDb ID from search results:
 
 **Architecture note - why this recipe makes N+1 calls:** DetailData is the ONLY endpoint that exposes the `priceHdIsLowest` / `priceSdIsLowest` flags (verified 2026-06-23: Deals.php returns 14 fields with no ATL data, Search.php returns 10 metadata fields, Prices.php with multiple imdbIDs works but returns the same 15 fields as Deals - none of them ATL-related). There is no batch DetailData endpoint - tested with `idInStore=A&idInStore=B`, `idInStore=A,B`, `ids=A,B`, `idInStores=A,B`: all variants return empty `{}`. So populating the ATL column requires 1 Deals call + 1 DetailData per item.
 
-**Use the bundled script** `scripts/atl_check.py` (parallel `ThreadPoolExecutor` with 8 workers) to make the N DetailData calls concurrent - empirically ~12s for 50 items vs ~150s for the inline sequential recipe below. The script also supports single-title lookup via `--title`, min-savings filtering, and JSON output.
+**Use the bundled script** `scripts/deals.py` (parallel `ThreadPoolExecutor` with 8 workers) to make the N DetailData calls concurrent - empirically ~12s for 50 items vs ~150s for the inline sequential recipe below. The script also supports single-title lookup via `--title`, min-savings filtering, and JSON output.
 
 ### "All-time low (ATL) deals" _(see [RECIPES.md](RECIPES.md) for the literal curl commands)_
 
@@ -334,7 +334,7 @@ Step 2 - Prices using IMDb ID from search results:
 
 *(see [RECIPES.md](RECIPES.md))*
 
-**For a runnable script** that does batch ATL filtering or single-title ATL lookup with proper exit codes, see `scripts/atl_check.py` (supports `--title`, `--type buymovies|seasons`, `--limit`, `--min-savings`, `--json`). This is the recommended path for cron jobs and one-off lookups - invoke with `python scripts/atl_check.py` (or the absolute path from your environment). The script is `currently at ATL` only - it does NOT filter by `priceHdLastChangeDate`; for date-bounded checks (e.g. "hit ATL in the last 24 hours") use the inline workflow in the Cron section.
+**For a runnable script** that does batch ATL filtering or single-title ATL lookup with proper exit codes, see `scripts/deals.py` (supports `--title`, `--type buymovies|seasons`, `--limit`, `--min-savings`, `--json`). This is the recommended path for cron jobs and one-off lookups - invoke with `python scripts/deals.py` (or the absolute path from your environment). The script is `currently at ATL` only - it does NOT filter by `priceHdLastChangeDate`; for date-bounded checks (e.g. "hit ATL in the last 24 hours") use the inline workflow in the Cron section.
 
 ### "Latest new-release movies on sale" _(see [RECIPES.md](RECIPES.md) for the literal curl commands)_
 
@@ -442,7 +442,7 @@ Prompt: |
 ```
 Schedule: daily at 9am (0 9 * * *)
 Prompt: |
-  Run: python scripts/atl_check.py --type buymovies --min-savings 5
+  Run: python scripts/deals.py --type buymovies --min-savings 5
   Report the top 5 ATL titles with title, current price, prior price, savings $, savings %, IMDb rating, and cheapChartsProductPageUrl.
   If no titles meet the threshold, stay silent.
   The script does parallel DetailData fetches via ThreadPoolExecutor (~12s for 50 items).
@@ -464,7 +464,8 @@ Prompt: |
 
 ## Support Files
 
-- `scripts/atl_check.py` - runnable Python script for batch ATL filtering (`--type`, `--limit`, `--min-savings`, `--json`) and single-title ATL lookup (`--title`). Uses parallel DetailData fetches. Suitable for cron jobs and one-off checks.
+- `scripts/deals.py` - runnable Python script for batch ATL filtering (`--type`, `--limit`, `--min-savings`, `--json`, `--exclude-bundles`) and single-title ATL lookup (`--title`). Uses parallel DetailData fetches. Suitable for cron jobs and one-off checks.
+- `references/demo-panels.md` - how to build the 4-panel README demo screenshots (PIL layout, 8-column format, parser for script output). Used to refresh `examples/demo-*.png` when ATL data shifts.
 
 ## Related Resources
 
@@ -477,9 +478,9 @@ CheapCharts also tracks video game prices at **games.cheapcharts.com** (Xbox, Pl
 - iOS app: id1622193150
 - Android app: com.cheapcharts.cheapcharts_games
 
-The `atl_check.py` script returns a clear error message if you pass `--store games` (it checks for the literal string and exits with code 2 + a redirect message). This is honest UX, not silent failure.
+The `deals.py` script returns a clear error message if you pass `--store games` (it checks for the literal string and exits with code 2 + a redirect message). This is honest UX, not silent failure.
 
-If CheapCharts ever releases a games API, add it as a separate script (e.g., `scripts/games_atl_check.py`) rather than overloading this one — the data shapes, store codes, and item taxonomies are different.
+If CheapCharts ever releases a games API, add it as a separate script (e.g., `scripts/games_deals.py`) rather than overloading this one — the data shapes, store codes, and item taxonomies are different.
 
 ## Related Resources
 
@@ -578,15 +579,25 @@ If CheapCharts ever releases a games API, add it as a separate script (e.g., `sc
 
 27. **`priceHdIsLowest` / `priceSdIsLowest` is the canonical ATL flag - different from `priceHdIsBest` / `priceSdIsBest`.** `IsLowest=1` means current price equals the all-time low across CheapCharts' tracked history. `IsBest=1` means current price is the floor of the CURRENT sale window - a previous sale may have gone lower (`IsLowest=0, IsBest=1` is common). Check `IsLowest` for "lowest ever" questions; check `IsBest` for "is this a good price right now" questions.
 
-28. **There is no batch DetailData endpoint - N+1 calls is the only way to enrich a Deals list with ATL data.** Verified 2026-06-23: `DetailData.php` only accepts a single `idInStore` per call. Tested alternative param shapes (`idInStore=A&idInStore=B`, comma-separated `idInStore=A,B`, `ids=A,B`, `idInStores=A,B`) - all return empty `{}`. None of the public gptapi endpoints (Deals, Search, Prices, Charts, Recommendations, Topseller) expose the ATL flags. Use the bundled `scripts/atl_check.py` (parallel `ThreadPoolExecutor`, 8 workers) to make the N DetailData calls concurrent - empirically ~12s for 50 items vs ~150s for sequential.
+28. **There is no batch DetailData endpoint - N+1 calls is the only way to enrich a Deals list with ATL data.** Verified 2026-06-23: `DetailData.php` only accepts a single `idInStore` per call. Tested alternative param shapes (`idInStore=A&idInStore=B`, comma-separated `idInStore=A,B`, `ids=A,B`, `idInStores=A,B`) - all return empty `{}`. None of the public gptapi endpoints (Deals, Search, Prices, Charts, Recommendations, Topseller) expose the ATL flags. Use the bundled `scripts/deals.py` (parallel `ThreadPoolExecutor`, 8 workers) to make the N DetailData calls concurrent - empirically ~12s for 50 items vs ~150s for sequential.
 
-29. **Before adding a recipe to this skill, check `scripts/` for an existing tool that already does the workflow.** This skill ships with `scripts/atl_check.py` (parallel batch ATL checker with CLI flags, JSON output, proper exit codes). The skill's inline bash recipes for ATL filtering are 10-12x slower than the script (sequential DetailData calls vs parallel). Recipes should reference the script with a short invocation. When extending the skill: `ls scripts/` and `grep -n 'scripts/' SKILL.md` first, then add a one-line "run this script" recipe instead of inlining the workflow.
+29. **Before adding a recipe to this skill, check `scripts/` for an existing tool that already does the workflow.** This skill ships with `scripts/deals.py` (parallel batch ATL checker with CLI flags, JSON output, proper exit codes). The skill's inline bash recipes for ATL filtering are 10-12x slower than the script (sequential DetailData calls vs parallel). Recipes should reference the script with a short invocation. When extending the skill: `ls scripts/` and `grep -n 'scripts/' SKILL.md` first, then add a one-line "run this script" recipe instead of inlining the workflow.
 
 30. **iTunes is the only store with reliable batch + complete catalog coverage.** The script accepts `--store` for all four stores, and single-title lookups work on Amazon/Vudu/Google Play, but the underlying CheapCharts data is sparser on those stores and the Deals endpoint returns a server-side error (HTTP 500, "There was an error handling the request") for many batch queries. Verified 2026-06-23: `--store amazon --limit 10` exits with code 2, while `--store itunes --limit 10` returns 80+ deals. For non-iTunes stores, prefer `--title <name>` lookups over batch mode, or fall back to Topseller (`gptapi/Topseller.php` with `store=itunes,amazon,vudu,googlePlay`) if you need cross-store batch data. Don't promise "all four stores" in agent reports without verifying the data for the specific title or genre.
 
 31. **`priceBefore < price` is signal, not noise - it means the sale just ended.** Verified 2026-06-24: on 20 classic-noir titles, 13 had `priceBefore < current price` (e.g. `now=$9.99, was=$4.99`) - the price went *up* at the last change, meaning the title was at $4.99 recently and the sale just expired. This is exactly the kind of title a user wants flagged as a "next drop target." **Do not render these rows as "-/--/--"** (treating absence of active savings as absence of useful info). The standard deal-report table (Presentation Guidelines #9) needs a fifth status - "sale ended" with the prior low price shown in the `Was` column - alongside "on sale" and "small sale." When you filter the Deals list down to "currently on sale," mention the sale-ended cohort separately so the user can decide whether to set an alert. The `priceHdDropIndicator` field tells you the direction without comparing `priceBefore` yourself: `1` = went up, `-1` = went down, `0` = unchanged.
 
 32. **Never fabricate store-direct URLs - the response always has them.** CheapCharts' DetailData response includes `productPageUrl` and `iTunesUrl` (the direct Apple TV purchase link) for every title, and `cheapChartsProductPageUrl` for the CheapCharts price-history page. These are emitted as full URLs - do not pattern-match or reconstruct them from `idInStore`. Verified 2026-06-24: a session attempted to reconstruct 20 plausible-looking Apple TV slugs by extending `idInStore` with a guessed `umc.cmc.<hash>` pattern; every one was a 404. The real URLs are in the response. The presentation guideline to "always include `cheapChartsProductPageUrl`" also applies to `productPageUrl`/`iTunesUrl` - both should appear in any "buy now" link in a deal report. If the field is missing from the response, render the link as the title in plain text (no link) and note "store URL unavailable" rather than guessing.
+
+33. **v3.0 reframed the script from "ATL-only" to "deals with ATL flag" - old defaults no longer apply.** Prior to v3.0, `atl_check.py` (now renamed `deals.py`) filtered to ATL-only deals by default. As of v3.0.0 (2026-06-24), the default is to show all current deals with an ATL column flag (✓ or `-`), and the ATL-only behavior moved behind the `--atl-only` flag. If a user asks "show me all the deals," they expect the v3.0 default (all deals, ATL as a column). If they ask "what's at its all-time low," that's `--atl-only`. If they ask "show me today's drops," the default already covers it (`latestPricechange` sort, no ATL filter). When in doubt, the user's question word "just" or "only" is a strong signal for `--atl-only`.
+
+34. **`--min-savings` is a threshold, not a category filter - it can return the same titles as a different threshold.** The script has no `--bundle-only` flag. Bundles have larger regular prices (e.g. $99.99 -> $14.99) so high savings thresholds (e.g. `--min-savings 30`) *correlate* with bundles, but don't *define* them. Verified 2026-06-24 building the v2.3.2 demo panels: `--type buymovies --min-savings 5 --limit 12` and `--min-savings 30 --limit 12` against the same iTunes US feed returned the same 5 titles in the same order (all happened to be 14-25 film collections). The second run was labeled "bundle deals" in the panel but was actually just a stricter savings threshold. To get a true bundle-only list, fetch each candidate's `isMovieBundle` from DetailData and filter client-side. Don't label a savings-threshold run as "bundle deals" (or "season deals", or "individual movies") unless you've actually filtered for that category - and if you have, mention the filter in the panel caption so a reader doesn't take it at face value.
+
+35. **`sort=greatestSavings` puts bundles at the top; `sort=latestPricechange` puts individual movies at the top.** Verified 2026-06-24: with iTunes US Deals, `sort=greatestSavings --limit 30` returned 30/30 bundles (because $99.99 -> $14.99 beats any single-movie deal in absolute savings). `sort=latestPricechange --limit 30` returned 1/30 bundles and 29/30 individual movies. When you need individual movies with ratings (e.g. for a demo panel showing IMDb scores), use `--sort latestPricechange` and consider also `--exclude-bundles` to be sure. Conversely, when you actually want bundles, use `--sort greatestSavings` plus the `--exclude-bundles` flag inverted (i.e. don't pass it) to get the full bundle list. The sort choice *is* the category filter for movie-vs-bundle dominance on this endpoint.
+
+36. **`isMovieBundle` is the canonical bundle-marker for Deals items, not `mediaType`.** Verified 2026-06-24: Deals items return `isMovieBundle: 0` or `1` (an int), but `mediaType` and `itemType` are `None` on the same items. Search items return `mediaType` (e.g. `"movies"`, `"seasons"`) but not `isMovieBundle`. The two endpoints use different field conventions. **For Deals / DetailData flows: check `isMovieBundle`. For Search-then-Prices flows: check `mediaType`.** The script's `--exclude-bundles` flag uses `isMovieBundle` because it operates on Deals candidates, not Search results. Don't try to use `--exclude-bundles` after a Search call - the field won't be there.
+
+37. **`imdbRating` and `rottenTomatoesRating` are Deals candidate fields, not DetailData fields.** Verified 2026-06-24: Deals items have `imdbRating` and `rottenTomatoesRating` populated (e.g. *Django Unchained* returns `imdbRating: 8.5, rottenTomatoesRating: 87`); DetailData items do NOT (DetailData's node is price/history only). The script copies these into the `atl` dict at the candidate-merge step. When building the report, render ratings for individual movies (where `isMovieBundle == 0`); for bundles and TV seasons, render `-` because the field is absent on the source data, not because of a script bug. Same applies to `imdbId`.
 
 ## Verification Checklist
 
@@ -605,10 +616,13 @@ If CheapCharts ever releases a games API, add it as a separate script (e.g., `sc
 - [ ] Movies Anywhere compatibility noted in multi-store comparisons (using studio heuristic from Movies Anywhere Compatibility section, not assumed)
 - [ ] Seasonal context mentioned if current date falls in a known sale window
 - [ ] For ATL questions ("lowest ever", "all-time low"): used `priceHdIsLowest` / `priceSdIsLowest` from DetailData, NOT parsed `priceHdEvolution` (Pitfall #26)
-- [ ] For cron / monitoring jobs that need ATL alerts: consider running `python scripts/atl_check.py --json` and parsing the output, instead of inlining the DetailData workflow
+- [ ] For cron / monitoring jobs that need ATL alerts: consider running `python scripts/deals.py --json` and parsing the output, instead of inlining the DetailData workflow
 - [ ] For non-iTunes stores: prefer `--title` lookups over batch mode (Pitfall #30); don't claim "all four stores" coverage without per-title verification
 - [ ] For "what came off a sale / next drop" questions: included the `priceBefore < price` cohort with `Status: sale ended` rows (Pitfall #31), not just the active-deals cohort
 - [ ] Store-direct "Buy" links use `productPageUrl` / `iTunesUrl` from the response, not reconstructed from `idInStore` (Pitfall #32)
+- [ ] For "individual movies with ratings" reports: use `--sort latestPricechange` (NOT `greatestSavings` - bundles dominate that sort, see Pitfall #34), and consider `--exclude-bundles` to be sure
+- [ ] When reporting Deals candidate fields, use `isMovieBundle` (int 0/1) for bundle detection - `mediaType`/`itemType` are NOT populated on Deals items (Pitfall #35)
+- [ ] Ratings (`imdbRating`, `rottenTomatoesRating`) come from Deals candidates, not DetailData - render them only for items with `isMovieBundle == 0` (Pitfall #36)
 
 ## Source
 

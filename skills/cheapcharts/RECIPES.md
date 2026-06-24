@@ -261,30 +261,30 @@ print(f\"evolution: {m.get('priceHdEvolution','')[:120]}\")"
 
 ```bash
 # Batch ATL filter - finds every current deal at all-time low, parallelized
-python scripts/atl_check.py --type buymovies --limit 60 --min-savings 5
+python scripts/deals.py --type buymovies --limit 60 --min-savings 5
 
 # Check TV seasons instead of movies
-python scripts/atl_check.py --type seasons --limit 30
+python scripts/deals.py --type seasons --limit 30
 
 # Single title lookup
-python scripts/atl_check.py --title "Fight Club"
+python scripts/deals.py --title "Fight Club"
 
 # JSON output for piping into other tools
-python scripts/atl_check.py --json --limit 30
+python scripts/deals.py --json --limit 30
 ```
 
 ```bash
 # Batch ATL filter - finds every current deal at all-time low, parallelized
-python scripts/atl_check.py --type buymovies --limit 60 --min-savings 5
+python scripts/deals.py --type buymovies --limit 60 --min-savings 5
 
 # Check TV seasons instead of movies
-python scripts/atl_check.py --type seasons --limit 30
+python scripts/deals.py --type seasons --limit 30
 
 # Single title lookup
-python scripts/atl_check.py --title "Fight Club"
+python scripts/deals.py --title "Fight Club"
 
 # JSON output for piping into other tools
-python scripts/atl_check.py --json --limit 30
+python scripts/deals.py --json --limit 30
 ```
 
 ---
@@ -473,7 +473,7 @@ curl -s "https://buster.cheapcharts.de/v1/gptapi/Deals.php?action=getDeals&store
 
 ```bash
 # Or via the script (all filters supported as CLI flags):
-python scripts/atl_check.py --genre Horror --max-price 4.99 --min-savings 3 --release-year 2015-2025 --limit 20
+python scripts/deals.py --genre Horror --max-price 4.99 --min-savings 3 --release-year 2015-2025 --limit 20
 ```
 
 ---
