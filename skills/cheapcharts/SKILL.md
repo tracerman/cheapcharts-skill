@@ -1,7 +1,7 @@
 ---
 name: cheapcharts
 description: "Use when looking up digital movie/TV show prices, deals, charts, or recommendations across iTunes, Amazon, Vudu, and Google Play. Free public API, no auth required."
-version: 2.1.0
+version: 2.2.0
 author: tracerman (built with love and coffee)
 license: MIT
 metadata:
