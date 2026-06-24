@@ -141,7 +141,8 @@ def format_atl_line(a):
     if price is not None and was is not None and was != price:
         try:
             save = float(was) - float(price)
-            save_str = f" (was ${was}, save ${save:.2f})"
+            pct = (save / float(was) * 100) if float(was) > 0 else 0
+            save_str = f" (was ${was}, save ${save:.2f} / {pct:.0f}%)"
         except (TypeError, ValueError):
             save_str = f" (was ${was})"
     else:
