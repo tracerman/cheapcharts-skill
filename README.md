@@ -33,12 +33,14 @@ The script emits a markdown table for direct use in reports, chat, and READMEs, 
 
 ## Demo
 
-A live run against the CheapCharts API on 2026-06-24 showing current deals on Apple TV US with the ATL column flagging which ones are at their historical low.
+Four independent runs against the live CheapCharts API on 2026-06-24, each capturing a different use case the skill is designed for.
 
 | | |
 |:---:|:---:|
-| ![Latest deals on Apple TV](skills/cheapcharts/examples/demo-deals-2026-06-24.png) | ![ATL-only deals](skills/cheapcharts/examples/demo-atl-only-2026-06-24.png) |
-| All current deals (ATL flagged in column) | ATL-only filter (`--atl-only` mode) |
+| ![ATL movie deals](skills/cheapcharts/examples/demo-movies-2026-06-24.png) | ![Multi-film bundle deals](skills/cheapcharts/examples/demo-bundles-2026-06-24.png) |
+| ATL movie deals (with IMDb + RT) | Multi-film bundle deals |
+| ![TV season ATL deals](skills/cheapcharts/examples/demo-seasons-2026-06-24.png) | ![Today's price drops](skills/cheapcharts/examples/demo-today-2026-06-24.png) |
+| TV season deals at ATL | Today's price drops |
 
 The `deals.py` script outputs a markdown table like:
 
@@ -47,12 +49,12 @@ The `deals.py` script outputs a markdown table like:
 
 | Title | Fmt | Now | Was | Save | IMDb | RT | Date | ATL | Buy | History |
 |---|:-:|---:|---:|---|:-:|:-:|---|:-:|:-:|:-:|
-| [Burt](https://tv.apple.com/us/movie/...) | HD | $9.99 | $11.99 | $2.00 (17%) | - | - | 2026-06-23 | ✓ | [Buy] | [History] |
-| [Going Clear: Scientology...](https://tv.apple.com/us/movie/...) | HD | $6.99 | $12.99 | $6.00 (46%) | 8 | 95 | 2026-06-23 | - | [Buy] | [History] |
-| [Springsteen: Deliver Me from Nowhere](https://tv.apple.com/us/movie/...) | 4K | $4.99 | $7.99 | $3.00 (38%) | 6.7 | 61 | 2026-06-24 | ✓ | [Buy] | [History] |
+| [Burt](https://tv.apple.com/us/movie/umc.cmc.7dlscf08qk4gtqad1ysutbs31?at=1l3v4gB) | HD | $9.99 | $11.99 | $2.00 (17%) | - | - | 2026-06-23 | ✓ | [Buy](https://tv.apple.com/us/movie/umc.cmc.7dlscf08qk4gtqad1ysutbs31?at=1l3v4gB) | [History](https://www.cheapcharts.com/us/itunes/movies/1888698719) |
+| [Going Clear](https://tv.apple.com/us/movie/umc.cmc.5sjuv6fnbcpgjkaiion1hb7yt?at=1l3v4gB) | HD | $6.99 | $12.99 | $6.00 (46%) | 8 | 95 | 2026-06-23 | - | [Buy](https://tv.apple.com/us/movie/umc.cmc.5sjuv6fnbcpgjkaiion1hb7yt?at=1l3v4gB) | [History](https://www.cheapcharts.com/us/itunes/movies/1876110281) |
+| [Springsteen: Deliver Me from Nowhere](https://tv.apple.com/us/movie/umc.cmc.44ij3fzlajh43wxngtyxd6ioi?at=1l3v4gB) | 4K | $4.99 | $7.99 | $3.00 (38%) | 6.7 | 61 | 2026-06-24 | ✓ | [Buy](https://tv.apple.com/us/movie/umc.cmc.44ij3fzlajh43wxngtyxd6ioi?at=1l3v4gB) | [History](https://www.cheapcharts.com/us/itunes/movies/1853855567) |
 ```
 
-The `ATL` column shows `✓` for titles currently at their all-time low and `-` for typical sales. The `[Buy]` link goes to the Apple TV purchase page; `[History]` goes to the CheapCharts price-history page. Titles are direct-clickable. Format column shows `4K` / `HD` / `SD` based on what `has4K` says in DetailData (or fall-back). IMDb and RT columns show `-` for bundles and TV seasons (CheapCharts doesn't carry ratings for those item types).
+The `ATL` column shows `✓` for titles currently at their all-time low and `-` for typical sales. The `[Buy](url)` link goes to the Apple TV purchase page; `[History](url)` goes to the CheapCharts price-history page. Titles are direct-clickable (each `[Title](url)` links to Apple TV). Format column shows `4K` / `HD` / `SD` based on `has4K` in DetailData. IMDb and RT columns show `-` for bundles and TV seasons (CheapCharts doesn't carry ratings for those item types).
 
 ## How it works
 
@@ -124,8 +126,10 @@ cheapcharts-skill/
         ├── RECIPES.md                 # copy-pasteable command recipes
         ├── README.md                   # per-skill landing page
         ├── examples/
-        │   ├── demo-deals-2026-06-24.png      # default mode (all deals, ATL flag)
-        │   └── demo-atl-only-2026-06-24.png   # --atl-only mode (v2.x behavior)
+        │   ├── demo-movies-2026-06-24.png      # ATL movie deals (with IMDb + RT)
+        │   ├── demo-bundles-2026-06-24.png     # multi-film bundle deals
+        │   ├── demo-seasons-2026-06-24.png     # TV season deals
+        │   └── demo-today-2026-06-24.png       # today's price drops
         ├── scripts/
         │   └── deals.py                # the parallel deal/ATL finder
         └── claude-code/
