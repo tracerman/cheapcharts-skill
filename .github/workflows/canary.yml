@@ -73,6 +73,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          gh label create api-canary --repo "$GITHUB_REPOSITORY" \
+            --description "Weekly live-API canary failures" --color D93F0B 2>/dev/null || true
           existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --label api-canary --state open --json number --jq length)
           if [ "$existing" -gt 0 ]; then
             echo "open canary issue already exists - not filing a duplicate"
