@@ -29,13 +29,14 @@ Usage:
     python deals.py --store amazon --title "Fight Club"  # single lookup on a specific store
     python deals.py --type seasons            # TV season deals instead of movies
     python deals.py --type rentalmovies       # rental movie deals
-    python deals.py --sort greatestSavings    # default; sort by biggest savings
-    python deals.py --genre Horror            # filter to a specific genre
+    python deals.py --sort greatestSavings    # sort by biggest savings (default: latestPricechange)
+    python deals.py --genre Horror            # filter to a specific genre (case-insensitive)
     python deals.py --max-price 4.99          # only deals under $5
     python deals.py --release-year 2020-2025  # filter by release year range
     python deals.py --quality 4k             # only 4K items
     python deals.py --limit 30                # narrower deal pool
     python deals.py --min-savings 5           # only show items with $5+ savings
+    python deals.py --since 1                 # only items whose price changed in the last day
     python deals.py --atl-only                # filter to ATL rows only (v2.x default behavior)
 
 Combined filters (per llms.txt guideline #11):
@@ -51,9 +52,19 @@ import argparse
 import json
 import re
 import sys
+import time
+import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
 from urllib.parse import quote, urlencode
+
+# The markdown table uses non-ASCII glyphs (the ATL checkmark). Windows consoles
+# and pipes default to cp1252, which cannot encode them and kills the whole run
+# with UnicodeEncodeError - force UTF-8 wherever the runtime allows it.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure") and (_stream.encoding or "").lower() not in ("utf-8", "utf8"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
 
 API_BASE = "https://buster.cheapcharts.de/v1"
 DEFAULT_STORE = "itunes"
@@ -86,11 +97,50 @@ VALID_GENRES = (
 VALID_QUALITIES = ("hd4k", "hd", "sd", "4k", "sdOnly")
 
 
-def fetch(url):
-    """Fetch URL with a User-Agent. Returns parsed JSON or raises."""
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as r:
-        return json.loads(r.read())
+def fetch(url, retries=2):
+    """Fetch URL with a User-Agent, retrying transient failures with backoff.
+
+    Returns parsed JSON or raises the last error after `retries` retries.
+    """
+    last_err = None
+    for attempt in range(retries + 1):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as r:
+                return json.loads(r.read())
+        except (urllib.error.URLError, TimeoutError, ValueError) as e:
+            last_err = e
+            if attempt < retries:
+                time.sleep(1.5 * (attempt + 1))
+    raise last_err
+
+
+def normalize_genre(genre):
+    """Map a case-insensitive genre name to the API's CamelCase enum value.
+
+    Returns None for unknown genres. This matters because the API does NOT
+    error on unknown genre values - it silently returns the unfiltered list
+    (Pitfall: genre falls back to All), so 'horror' instead of 'Horror' would
+    quietly give the user everything.
+    """
+    if not genre:
+        return None
+    return {g.lower(): g for g in VALID_GENRES}.get(genre.strip().lower())
+
+
+def within_days(date_str, days):
+    """True if date_str (YYYY-MM-DD...) falls within the last `days` days (UTC).
+
+    --since 1 means "changed today"; --since 3 means "changed in the last 3 days".
+    Unparseable or missing dates return False.
+    """
+    if not date_str:
+        return False
+    try:
+        d = datetime.strptime(str(date_str)[:10], "%Y-%m-%d").date()
+    except ValueError:
+        return False
+    return (datetime.now(timezone.utc).date() - d).days < days
 
 
 def get_id_from_url(url):
@@ -220,7 +270,9 @@ def check_single_title(title, store=DEFAULT_STORE, country=DEFAULT_COUNTRY):
         err_msg = node.get("_error", "unknown") if node else "empty response"
         print(f"  detail lookup failed for '{title}': {err_msg}", file=sys.stderr)
         return 2
-    price = node.get("priceHd") or node.get("priceSd")
+    price = node.get("priceHd")
+    if price is None:
+        price = node.get("priceSd")
     print(f"  {node.get('title')}: ${price}")
     print(f"    ATL (IsLowest):      hd={node.get('priceHdIsLowest')} sd={node.get('priceSdIsLowest')}")
     print(f"    Current-sale floor (IsBest): hd={node.get('priceHdIsBest')} sd={node.get('priceSdIsBest')}")
@@ -265,7 +317,7 @@ def build_deals_url(item_type, store, country, limit, sort, genre=None,
 def check_batch(item_type, store=DEFAULT_STORE, country=DEFAULT_COUNTRY, limit=DEFAULT_LIMIT,
                 min_savings=None, output_json=False, sort=DEFAULT_SORT,
                 genre=None, max_price=None, release_year=None, quality=None,
-                exclude_bundles=False, atl_only=False):
+                exclude_bundles=False, atl_only=False, since_days=None):
     """Pull current deals with optional filters, then in parallel verify
     each via DetailData's IsLowest flag."""
     deals_url = build_deals_url(
@@ -294,27 +346,41 @@ def check_batch(item_type, store=DEFAULT_STORE, country=DEFAULT_COUNTRY, limit=D
             continue
         candidates.append((d, itype, sid))
 
-    # Parallel DetailData fetches
-    atl = []
+    # Parallel DetailData fetches. as_completed yields in COMPLETION order, so
+    # rows carry their candidate index and get re-sorted afterwards - otherwise
+    # the output would scramble the Deals API's sort order.
+    rows = []
+    failed = 0
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
         future_to_deal = {
-            pool.submit(fetch_detail, itype, sid, store, country): (d, itype)
-            for d, itype, sid in candidates
+            pool.submit(fetch_detail, itype, sid, store, country): (idx, d, itype)
+            for idx, (d, itype, sid) in enumerate(candidates)
         }
         for fut in as_completed(future_to_deal):
-            d, itype = future_to_deal[fut]
+            idx, d, itype = future_to_deal[fut]
             try:
                 node = fut.result()
             except Exception:
+                failed += 1
                 continue
             if not node or node.get("_error"):
+                failed += 1
                 continue
             # v3.0: by default, include all deals (ATL flag is shown as a column).
             # --atl-only restores the v2.x behavior of dropping non-ATL rows.
             if atl_only and not is_atl(node):
                 continue
-            price = node.get("priceHd") or node.get("priceSd")
-            was = node.get("priceHdBefore") or node.get("priceSdBefore")
+            change_date = node.get("priceHdLastChangeDate") or node.get("priceSdLastChangeDate")
+            if since_days is not None and not within_days(change_date, since_days):
+                continue
+            # Explicit None checks: a legitimate $0.00 price is falsy and must
+            # not fall through to the other tier.
+            price = node.get("priceHd")
+            if price is None:
+                price = node.get("priceSd")
+            was = node.get("priceHdBefore")
+            if was is None:
+                was = node.get("priceSdBefore")
             if min_savings is not None and price is not None and was is not None:
                 try:
                     if float(was) - float(price) < min_savings:
@@ -330,13 +396,13 @@ def check_batch(item_type, store=DEFAULT_STORE, country=DEFAULT_COUNTRY, limit=D
                     save_pct = (save_amount / float(was) * 100) if float(was) > 0 else 0
                 except (TypeError, ValueError):
                     pass
-            atl.append({
+            rows.append((idx, {
                 "title": node.get("title"),
                 "price": price,
                 "was": was,
                 "save": save_amount,
                 "save_pct": save_pct,
-                "change_date": node.get("priceHdLastChangeDate") or node.get("priceSdLastChangeDate"),
+                "change_date": change_date,
                 "is_atl_hd": node.get("priceHdIsLowest") == 1,
                 "is_atl_sd": node.get("priceSdIsLowest") == 1,
                 # Format (HD / 4K / SD) - the actual video quality tier of this title.
@@ -358,7 +424,18 @@ def check_batch(item_type, store=DEFAULT_STORE, country=DEFAULT_COUNTRY, limit=D
                 "media_type": d.get("mediaType"),
                 "item_type": d.get("itemType"),
                 "is_movie_bundle": d.get("isMovieBundle"),
-            })
+            }))
+
+    # Restore the Deals API's sort order.
+    rows.sort(key=lambda pair: pair[0])
+    atl = [row for _, row in rows]
+
+    if failed:
+        print(f"  warning: {failed} of {len(candidates)} DetailData lookups failed - "
+              f"results may be incomplete", file=sys.stderr)
+    if failed and failed == len(candidates):
+        print("  all DetailData lookups failed - treating as API error", file=sys.stderr)
+        return 2
 
     if output_json:
         print(json.dumps(atl, indent=2))
@@ -372,13 +449,15 @@ def check_batch(item_type, store=DEFAULT_STORE, country=DEFAULT_COUNTRY, limit=D
             filter_desc.append(f"releaseYear={release_year}")
         if quality and quality != "hd4k":
             filter_desc.append(f"quality={quality}")
+        if since_days is not None:
+            filter_desc.append(f"since={since_days}d")
         if exclude_bundles:
             filter_desc.append("excludeBundles=true")
-        print(format_atl_markdown(atl, item_type, len(candidates), filter_desc))
+        print(format_atl_markdown(atl, item_type, len(candidates), filter_desc, failed_count=failed))
     return 0 if atl else 1
 
 
-def format_atl_markdown(atl, item_type, candidates_count, filter_desc):
+def format_atl_markdown(atl, item_type, candidates_count, filter_desc, failed_count=0):
     """Render the ATL list as a markdown table suitable for direct inclusion in
     agent reports, READMEs, and chat output.
 
@@ -392,8 +471,9 @@ def format_atl_markdown(atl, item_type, candidates_count, filter_desc):
     doesn't carry ratings for those item types).
     """
     filter_str = f" [{', '.join(filter_desc)}]" if filter_desc else ""
+    failed_str = f", {failed_count} lookups failed" if failed_count else ""
     lines = [
-        f"**{len(atl)} {item_type}** (out of {candidates_count} checked{filter_str})",
+        f"**{len(atl)} {item_type}** (out of {candidates_count} checked{failed_str}{filter_str})",
         "",
         "| Title | Fmt | Now | Was | Save | IMDb | RT | Date | ATL | Buy | History |",
         "|---|:-:|---:|---:|---|:-:|:-:|---|:-:|:-:|:-:|",
@@ -449,10 +529,13 @@ def main():
                    help=f"Deals pool size for batch mode (default: {DEFAULT_LIMIT})")
     p.add_argument("--min-savings", type=float, default=None,
                    help="Only show ATL items with at least this $ savings vs priceBefore")
+    p.add_argument("--since", type=int, default=None, metavar="N",
+                   help="Only show deals whose last price change was within the last N days "
+                        "(e.g. --since 1 for today's drops). Batch mode only.")
     p.add_argument("--sort", choices=VALID_SORTS, default=DEFAULT_SORT,
                    help=f"Sort order for Deals (default: {DEFAULT_SORT})")
     p.add_argument("--genre", default=None,
-                   help="Filter by genre (e.g. Horror, Drama, SciFiFantasy). "
+                   help="Filter by genre (e.g. Horror, Drama, SciFiFantasy; case-insensitive). "
                         "Only honored on itemType=buymovies (Pitfall #21, #22).")
     p.add_argument("--max-price", type=float, default=None,
                    help="Filter to deals with current price at or below this USD amount.")
@@ -468,6 +551,17 @@ def main():
                         "v3.0 defaults to showing all deals with ATL as a column flag.")
     p.add_argument("--json", action="store_true", help="Emit JSON (batch mode only)")
     args = p.parse_args()
+
+    # Validate genre before calling the API: unknown values are silently
+    # treated as "All" server-side, which would return every deal unfiltered.
+    if args.genre:
+        genre = normalize_genre(args.genre)
+        if genre is None:
+            print(f"  unknown genre '{args.genre}' (the API silently ignores unknown genres "
+                  f"and returns ALL deals)", file=sys.stderr)
+            print(f"  valid genres: {', '.join(VALID_GENRES)}", file=sys.stderr)
+            return 2
+        args.genre = genre
 
     try:
         if args.title:
@@ -491,6 +585,7 @@ def main():
             quality=args.quality,
             exclude_bundles=args.exclude_bundles,
             atl_only=args.atl_only,
+            since_days=args.since,
         )
     except Exception as e:
         print(f"  error: {e}", file=sys.stderr)
