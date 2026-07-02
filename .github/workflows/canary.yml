@@ -80,11 +80,14 @@ jobs:
             echo "open canary issue already exists - not filing a duplicate"
             exit 0
           fi
+          {
+            echo "The weekly live-API canary failed. Check the run for which step broke: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            echo ""
+            echo "- If the *pitfall* step reported DRIFT, an empirical claim in references/PITFALLS.md is stale and needs re-verification."
+            echo "- If the *smoke* steps failed with exit >= 2, the API or the script is broken."
+            echo "- If everything errors, the API may just be down; re-run before digging."
+          } > /tmp/canary-issue-body.md
           gh issue create --repo "$GITHUB_REPOSITORY" \
             --title "Canary failed: possible CheapCharts API drift ($(date -u +%F))" \
             --label api-canary \
-            --body "The weekly live-API canary failed. Check the run for which step broke: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
-
-- If the *pitfall* step reported DRIFT, an empirical claim in SKILL.md/references/PITFALLS.md is stale and needs re-verification.
-- If the *smoke* steps failed with exit >= 2, the API or the script is broken.
-- If everything errors, the API may just be down; re-run before digging."
+            --body-file /tmp/canary-issue-body.md
