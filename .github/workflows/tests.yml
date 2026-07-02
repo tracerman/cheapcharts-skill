@@ -1,4 +1,8 @@
-name: Test deals.py
+name: Tests
+
+# Deterministic CI: lint + offline unit tests only. Nothing here touches the
+# live CheapCharts API, so a red run always means a code problem, never an
+# upstream outage. Live-API behavior is covered by canary.yml on a schedule.
 
 on:
   push:
@@ -8,27 +12,33 @@ on:
   workflow_dispatch:
 
 jobs:
-  smoke-test:
+  lint:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-      - name: Smoke test - script runs and exits 0 or 1
-        run: |
-          python skills/cheapcharts/scripts/deals.py --type buymovies --limit 5
-          # Script exits 0 on success, 1 on "no deals found"
-          # Either is acceptable; just verify it parses args and runs.
-      - name: JSON output mode
-        run: |
-          python skills/cheapcharts/scripts/deals.py --type buymovies --limit 3 --json | python -c "import json, sys; data=json.load(sys.stdin); assert isinstance(data, list); print(f'OK: {len(data)} items')"
-      - name: Single title lookup
-        run: |
-          python skills/cheapcharts/scripts/deals.py --title "Bernie"
-      - name: ATL-only mode (v2.x compat)
-        run: |
-          python skills/cheapcharts/scripts/deals.py --type buymovies --limit 30 --atl-only --min-savings 3 | head -3
-          # Smoke-test that the --atl-only flag works (v2.x behavior preserved)
+          python-version: "3.13"
+      - name: Install ruff
+        run: pip install ruff
+      - name: Lint
+        run: ruff check skills/cheapcharts/scripts tests .github/scripts
+
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.9 is the documented floor (README badge), 3.13 the current release
+        python-version: ["3.9", "3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install pytest
+        run: pip install pytest
+      - name: Unit tests (offline, fixture-based)
+        run: pytest tests

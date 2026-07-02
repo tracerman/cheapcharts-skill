@@ -1,0 +1,45 @@
+name: Release
+
+# Tag-triggered release automation. Pushing a tag like v3.1.0 builds the
+# Claude Desktop skill zip and attaches it to a GitHub release, so the
+# README can link .../releases/latest/download/cheapcharts-claude-desktop.zip
+# without hand-bumping versions.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check tag matches SKILL.md version
+        run: |
+          skill_version=$(grep -m1 '^version:' skills/cheapcharts/SKILL.md | awk '{print $2}')
+          tag_version="${GITHUB_REF_NAME#v}"
+          echo "SKILL.md: $skill_version / tag: $tag_version"
+          if [ "$skill_version" != "$tag_version" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match SKILL.md version $skill_version"
+            exit 1
+          fi
+
+      - name: Build Claude Desktop zip
+        run: |
+          cd skills
+          zip -r ../cheapcharts-claude-desktop.zip cheapcharts
+          cd ..
+          unzip -l cheapcharts-claude-desktop.zip
+
+      - name: Create release with asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" cheapcharts-claude-desktop.zip \
+            --title "$GITHUB_REF_NAME" --generate-notes \
+          || gh release upload "$GITHUB_REF_NAME" cheapcharts-claude-desktop.zip --clobber

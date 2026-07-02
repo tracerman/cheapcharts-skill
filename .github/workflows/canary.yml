@@ -1,0 +1,88 @@
+name: Live API canary
+
+# Weekly probe of the live CheapCharts API. Two jobs:
+#   1. smoke  - the bundled script still works end-to-end against real data.
+#               Exit 1 ("no deals matched") is a legitimate outcome and is
+#               tolerated; only exit >= 2 (API/script error) fails the job.
+#   2. pitfalls - re-tests the empirically-discovered API behaviors that
+#               SKILL.md's pitfall knowledge base depends on, so silent
+#               upstream drift gets caught here instead of by users.
+# On failure, a labeled issue is opened (deduplicated against open ones).
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Batch smoke test (exit 1 = empty result = OK)
+        run: |
+          set +e
+          python skills/cheapcharts/scripts/deals.py --type buymovies --limit 10
+          code=$?
+          set -e
+          echo "exit code: $code"
+          if [ "$code" -ge 2 ]; then exit "$code"; fi
+
+      - name: JSON mode produces valid JSON
+        run: |
+          set -o pipefail
+          set +e
+          python skills/cheapcharts/scripts/deals.py --type buymovies --limit 5 --json > deals.json
+          code=$?
+          set -e
+          if [ "$code" -ge 2 ]; then exit "$code"; fi
+          python -c "import json; data=json.load(open('deals.json')); assert isinstance(data, list); print(f'OK: {len(data)} items')"
+
+      - name: Single-title lookup (exit 1 = not in catalog = OK)
+        run: |
+          set +e
+          python skills/cheapcharts/scripts/deals.py --title "Fight Club"
+          code=$?
+          set -e
+          echo "exit code: $code"
+          if [ "$code" -ge 2 ]; then exit "$code"; fi
+
+      - name: ATL-only mode (v2.x compat; exit 1 = none at ATL = OK)
+        run: |
+          set +e
+          python skills/cheapcharts/scripts/deals.py --type buymovies --limit 30 --atl-only
+          code=$?
+          set -e
+          echo "exit code: $code"
+          if [ "$code" -ge 2 ]; then exit "$code"; fi
+
+      - name: Pitfall assumptions still hold
+        run: python .github/scripts/canary_pitfalls.py
+
+      - name: Open drift issue on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --label api-canary --state open --json number --jq length)
+          if [ "$existing" -gt 0 ]; then
+            echo "open canary issue already exists - not filing a duplicate"
+            exit 0
+          fi
+          gh issue create --repo "$GITHUB_REPOSITORY" \
+            --title "Canary failed: possible CheapCharts API drift ($(date -u +%F))" \
+            --label api-canary \
+            --body "The weekly live-API canary failed. Check the run for which step broke: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+
+- If the *pitfall* step reported DRIFT, an empirical claim in SKILL.md/references/PITFALLS.md is stale and needs re-verification.
+- If the *smoke* steps failed with exit >= 2, the API or the script is broken.
+- If everything errors, the API may just be down; re-run before digging."
