@@ -117,7 +117,8 @@ def check_seasons_genre_still_broken():
     if not h or not d:
         return "error", "no season items returned for the genre probe"
     if h != d:
-        return "drift", "Horror and Drama season lists differ - the seasons genre filter may work now (Pitfall #21 stale)"
+        return "drift", ("Horror and Drama season lists differ - "
+                         "the seasons genre filter may work now (Pitfall #21 stale)")
     return "ok", "seasons genre filter still ignored (identical lists)"
 
 
