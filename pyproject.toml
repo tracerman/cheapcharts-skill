@@ -1,0 +1,16 @@
+# Tooling config only - the skill itself is a stdlib-only script, not a package.
+
+[tool.ruff]
+line-length = 120
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "UP", "SIM"]
+ignore = [
+    "UP015",  # explicit open() modes are fine
+    "SIM108", # if/else blocks are often clearer than long ternaries
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

@@ -51,6 +51,7 @@ Exit codes:
 import argparse
 import json
 import re
+import socket
 import sys
 import time
 import urllib.error
@@ -108,7 +109,9 @@ def fetch(url, retries=2):
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
             with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as r:
                 return json.loads(r.read())
-        except (urllib.error.URLError, TimeoutError, ValueError) as e:
+        except (urllib.error.URLError, socket.timeout, TimeoutError, ValueError) as e:
+            # socket.timeout is only an alias of TimeoutError from 3.10; listed
+            # separately so read-timeouts retry on Python 3.9 too.
             last_err = e
             if attempt < retries:
                 time.sleep(1.5 * (attempt + 1))
@@ -189,73 +192,6 @@ def is_atl(node):
     return node.get("priceHdIsLowest") == 1 or node.get("priceSdIsLowest") == 1
 
 
-def format_atl_line(a):
-    """Pretty-print one ATL item.
-
-    Output shape (per row):
-      Title | $price (was $was, save $X.XX / N%) | [Format] [HDR] | IMDb N.N | RT N% | changed YYYY-MM-DD
-        buy: <apple-tv-url>
-        history: <cheapcharts-url>
-
-    The format tag (HD / 4K / SD) is the actual video quality tier - what the buyer
-    gets for their money. The previous [BOTH]/[HD]/[SD] prefix was misleading: it
-    signalled "this price is the floor in both HD and SD tiers" (a savings signal),
-    not the format of the title. The savings signal is implicit in the ATL status;
-    no need to duplicate it as a prefix.
-
-    Ratings (IMDb, Rotten Tomatoes) are only emitted for individual movies; bundles,
-    TV seasons, and TV bundles show '-' because CheapCharts doesn't carry ratings for
-    those item types.
-    """
-    price = a.get("price")
-    was = a.get("was")
-    if price is not None and was is not None and was != price:
-        try:
-            save = float(was) - float(price)
-            pct = (save / float(was) * 100) if float(was) > 0 else 0
-            save_str = f" (was ${was}, save ${save:.2f} / {pct:.0f}%)"
-        except (TypeError, ValueError):
-            save_str = f" (was ${was})"
-    else:
-        save_str = ""
-    # Format info: 4K / HD / SD + optional HDR tag
-    fmt = a.get("format", "-")
-    hdr = a.get("hdr_format")
-    # Normalize hdrFormat: iTunes returns "Dolby Vision" or "No HDR" on the Deals
-    # side, but DetailData may return 1/0. Handle both.
-    if hdr in (1, True, "1"):
-        hdr_tag = " HDR"
-    elif hdr and hdr not in (0, "0", "No HDR", None):
-        hdr_tag = f" {hdr}"
-    else:
-        hdr_tag = ""
-    fmt_tag = f" [{fmt}{hdr_tag}]"
-    # Ratings: only meaningful for individual movies (not bundles). Deals API
-    # exposes `isMovieBundle`; Search exposes `mediaType`. We get here from Deals,
-    # so use `isMovieBundle` (which is 0 / absent for individual movies, 1 / True
-    # for multi-film collections).
-    imdb = a.get("imdb_rating")
-    rt = a.get("rotten_tomatoes_rating")
-    is_bundle = a.get("is_movie_bundle")
-    if not is_bundle:  # individual movie - emit ratings (or '-' if missing)
-        rating_str = f" | IMDb {imdb if imdb is not None else '-'} | RT {rt if rt is not None else '-'}"
-    else:
-        rating_str = " | IMDb - | RT -"
-    store_url = a.get("store_url")
-    cc_url = a.get("url")
-    url_parts = []
-    if store_url:
-        url_parts.append(f"buy: {store_url}")
-    if cc_url:
-        url_parts.append(f"history: {cc_url}")
-    url_block = ("\n    " + "\n    ".join(url_parts)) if url_parts else ""
-    return (
-        f"  {a['title']} | ${price}{save_str}{fmt_tag}"
-        f"{rating_str} | changed {a.get('change_date', '?')}"
-        f"{url_block}"
-    )
-
-
 def check_single_title(title, store=DEFAULT_STORE, country=DEFAULT_COUNTRY):
     """Resolve a title via Search, then check DetailData for ATL status."""
     itype, sid, err = search_id(title, store, country)
@@ -329,7 +265,7 @@ def check_batch(item_type, store=DEFAULT_STORE, country=DEFAULT_COUNTRY, limit=D
         print(f"  deals fetch failed: {msg}", file=sys.stderr)
         if store != DEFAULT_STORE:
             print(f"  note: CheapCharts' Deals endpoint is most stable for iTunes. For {store},", file=sys.stderr)
-            print(f"  try --title <name> for a single-title lookup, or use --store itunes for batch.", file=sys.stderr)
+            print("  try --title <name> for a single-title lookup, or use --store itunes for batch.", file=sys.stderr)
         return 2
     deals = data.get("results", {}).get(item_type, [])
     if not deals:
@@ -509,7 +445,8 @@ def format_atl_markdown(atl, item_type, candidates_count, filter_desc, failed_co
         # Escape any pipe chars in title (rare, but possible)
         title_cell_safe = title_cell.replace("|", "\\|")
         lines.append(
-            f"| {title_cell_safe} | {fmt} | {price_str} | {was_str} | {save_str} | {imdb_cell} | {rt_cell} | {date_cell} | {atl_cell} | {buy_cell} | {hist_cell} |"
+            f"| {title_cell_safe} | {fmt} | {price_str} | {was_str} | {save_str} "
+            f"| {imdb_cell} | {rt_cell} | {date_cell} | {atl_cell} | {buy_cell} | {hist_cell} |"
         )
     return "\n".join(lines)
 
@@ -569,7 +506,8 @@ def main():
         if args.store == "games":
             print("  CheapCharts Games has no public API (verified 2026-06-23).", file=sys.stderr)
             print("  For current game deals, see: https://games.cheapcharts.com", file=sys.stderr)
-            print("  Or use the CheapCharts Games mobile apps (iOS: id1622193150, Android: com.cheapcharts.cheapcharts_games).", file=sys.stderr)
+            print("  Or use the CheapCharts Games mobile apps "
+                  "(iOS: id1622193150, Android: com.cheapcharts.cheapcharts_games).", file=sys.stderr)
             return 2
         return check_batch(
             item_type=args.type,

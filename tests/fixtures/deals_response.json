@@ -1,0 +1,59 @@
+{
+  "status": "success",
+  "results": {
+    "buymovies": [
+      {
+        "title": "First Movie | With Pipe",
+        "price": 4.99,
+        "priceBefore": 12.99,
+        "cheapChartsProductPageUrl": "https://www.cheapcharts.com/us/itunes/movies/111",
+        "isMovieBundle": 0,
+        "imdbId": "tt0000111",
+        "imdbRating": 8.1,
+        "rottenTomatoesRating": 91,
+        "mediaType": null,
+        "itemType": null,
+        "genre": "Drama",
+        "currency": "USD",
+        "releaseDate": "2020-01-15"
+      },
+      {
+        "title": "Second Bundle",
+        "price": 14.99,
+        "priceBefore": 49.99,
+        "cheapChartsProductPageUrl": "https://www.cheapcharts.com/us/itunes/movies/222",
+        "isMovieBundle": 1,
+        "imdbId": null,
+        "imdbRating": null,
+        "rottenTomatoesRating": null,
+        "mediaType": null,
+        "itemType": null,
+        "genre": "Action & Adventure",
+        "currency": "USD",
+        "releaseDate": "2030-12-31"
+      },
+      {
+        "title": "Third Movie",
+        "price": 7.99,
+        "priceBefore": 9.99,
+        "cheapChartsProductPageUrl": "https://www.cheapcharts.com/us/itunes/movies/333",
+        "isMovieBundle": 0,
+        "imdbId": "tt0000333",
+        "imdbRating": 6.5,
+        "rottenTomatoesRating": 55,
+        "mediaType": null,
+        "itemType": null,
+        "genre": "Horror",
+        "currency": "USD",
+        "releaseDate": "2024-06-01"
+      },
+      {
+        "title": "No URL Item (skipped at candidate stage)",
+        "price": 3.99,
+        "priceBefore": 5.99,
+        "cheapChartsProductPageUrl": "https://www.cheapcharts.com/us/itunes/other/999",
+        "isMovieBundle": 0
+      }
+    ]
+  }
+}
