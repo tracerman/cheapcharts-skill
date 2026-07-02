@@ -288,6 +288,133 @@ def test_main_store_games_is_a_clear_error(monkeypatch, capsys):
     assert "games.cheapcharts.com" in capsys.readouterr().err
 
 
+# ------------------------------------------------- price history / evolution
+
+TJ_KIDS_EVOLUTION = ("2026-07-01:+44.99~2026-06-26:-14.99~2026-06-01:-29.99~2026-01-21:+44.99"
+                     "~2026-01-12:-19.99~2026-01-06:+44.99~2025-12-19:-29.99~2024-12-03:+44.99"
+                     "~2024-11-21:-19.99~2022-06-22:+44.99~2022-05-16:-29.99~2021-11-30:+44.99"
+                     "~2021-11-19:-14.99~2021-02-23:44.99")
+BERNIE_EVOLUTION = ("2026-06-23:-4.99~2026-05-06:+12.99~2026-05-01:-5.99~2026-04-14:+12.99"
+                    "~2026-04-10:-4.99~2026-03-20:+12.99~2026-03-13:-8.99~2026-02-17:12.99")
+
+
+def test_parse_evolution_absolute_prices():
+    entries = deals.parse_evolution(TJ_KIDS_EVOLUTION)
+    assert len(entries) == 14
+    # Newest first; each value is the ABSOLUTE price, sign is direction only
+    assert entries[0] == ("2026-07-01", "+", 44.99)
+    assert entries[-1] == ("2021-02-23", "", 44.99)     # initial listing, no sign
+    # Newest segment equals the live current price (the consistency invariant)
+    assert deals.parse_evolution(BERNIE_EVOLUTION)[0][2] == 4.99
+
+
+def test_parse_evolution_skips_malformed():
+    assert deals.parse_evolution("garbage~2026-01-01:-4.99~also:bad") == [("2026-01-01", "-", 4.99)]
+    assert deals.parse_evolution("") == []
+    assert deals.parse_evolution(None) == []
+
+
+def test_format_history_lines_marks_floor():
+    lines = deals.format_history_lines(TJ_KIDS_EVOLUTION, "SD")
+    assert lines[0] == "    SD price history (14 changes, floor $14.99):"
+    floor_lines = [ln for ln in lines if "historical floor" in ln]
+    assert len(floor_lines) == 2                        # Nov 2021 and Jun 2026
+    assert "2021-11-19 -> 2021-11-30: dropped to $14.99" in floor_lines[0]
+    assert lines[-1].endswith("rose to $44.99")         # newest row ends at "now"
+    assert "-> now:" in lines[-1]
+    assert deals.format_history_lines(None, "HD") == []
+
+
+# ------------------------------------------------------- search title match
+
+
+def test_score_match_prefers_franchise_over_short_substring():
+    query = "Tom and Jerry Kids"
+    show = "Tom & Jerry Kids Show: The Complete Series"
+    movie = "Tom & Jerry"                               # the unrelated 2021 movie
+    assert deals.score_match(query, show) > deals.score_match(query, movie)
+
+
+def test_score_match_exact_wins():
+    assert deals.score_match("Bernie", "Bernie") > deals.score_match("Bernie", "Bernie Mac Show")
+    assert deals.score_match("", "anything") == 0.0
+
+
+def search_response(items):
+    return {"status": "success", "results": items}
+
+
+def test_search_id_picks_best_match_not_first_hit(monkeypatch):
+    hits = [
+        {"title": "Tom & Jerry",
+         "cheapChartsProductPageUrl": "https://www.cheapcharts.com/us/itunes/movies/1553452603"},
+        {"title": "Tom & Jerry Kids Show: The Complete Series",
+         "cheapChartsProductPageUrl": "https://www.cheapcharts.com/us/itunes/seasons/1550380051"},
+    ]
+    monkeypatch.setattr(deals, "fetch", lambda url, retries=2: search_response(hits))
+    itype, sid, err = deals.search_id("Tom and Jerry Kids Complete Series")
+    assert (itype, sid, err) == ("seasons", "1550380051", None)
+
+
+def test_search_id_skips_candidates_without_usable_url(monkeypatch):
+    hits = [
+        {"title": "Perfect Match", "cheapChartsProductPageUrl": "https://www.cheapcharts.com/us/other/1"},
+        {"title": "Perfect Match Extended", "cheapChartsProductPageUrl":
+            "https://www.cheapcharts.com/us/itunes/movies/42"},
+    ]
+    monkeypatch.setattr(deals, "fetch", lambda url, retries=2: search_response(hits))
+    itype, sid, err = deals.search_id("Perfect Match")
+    assert (itype, sid) == ("movies", "42")
+
+
+def test_search_id_warns_on_weak_match(monkeypatch, capsys):
+    hits = [
+        {"title": "Completely Unrelated Documentary",
+         "cheapChartsProductPageUrl": "https://www.cheapcharts.com/us/itunes/movies/7"},
+        {"title": "Also Wrong", "cheapChartsProductPageUrl": "https://www.cheapcharts.com/us/itunes/movies/8"},
+    ]
+    monkeypatch.setattr(deals, "fetch", lambda url, retries=2: search_response(hits))
+    itype, sid, err = deals.search_id("Zyzzyva Quantum Horizons")
+    err_out = capsys.readouterr().err
+    assert sid is not None                              # still returns the best guess
+    assert "weak title match" in err_out
+    assert "other search hits" in err_out
+
+
+def test_single_title_history_and_na_rendering(monkeypatch, capsys):
+    def router(url, retries=2):
+        if "Search.php" in url:
+            return search_response([{
+                "title": "Tom & Jerry Kids Show: The Complete Series",
+                "cheapChartsProductPageUrl": "https://www.cheapcharts.com/us/itunes/seasons/1550380051",
+            }])
+        if "DetailData.php" in url:
+            return {"results": {"seasons": {
+                "title": "Tom & Jerry Kids Show: The Complete Series",
+                "priceSd": 44.99, "priceHd": None,
+                "priceSdIsLowest": 0, "priceHdIsLowest": None,
+                "priceSdIsBest": 0, "priceHdIsBest": None,
+                "priceSdLastChangeDate": "2026-07-01",
+                "priceSdEvolution": TJ_KIDS_EVOLUTION, "priceHdEvolution": None,
+            }}}
+        raise AssertionError(url)
+
+    monkeypatch.setattr(deals, "fetch", router)
+    rc = deals.check_single_title("Tom & Jerry Kids Complete Series", show_history=True)
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "hd=n/a" in out                              # no raw None in output
+    assert "SD price history (14 changes, floor $14.99)" in out
+    assert out.count("historical floor") == 2
+
+
+def test_main_history_requires_title(monkeypatch, capsys):
+    monkeypatch.setattr("sys.argv", ["deals.py", "--history"])
+    rc = deals.main()
+    assert rc == 2
+    assert "--history requires --title" in capsys.readouterr().err
+
+
 def test_fetch_retries_then_raises(monkeypatch):
     import urllib.error
 

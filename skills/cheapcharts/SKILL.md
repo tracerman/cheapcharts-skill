@@ -1,7 +1,7 @@
 ---
 name: cheapcharts
 description: "Look up digital movie and TV deals, prices, charts, and recommendations on iTunes/Apple TV, Amazon, Vudu, and Google Play via the free CheapCharts public API (no auth or API key). Produces a markdown deal table with an all-time-low (ATL) flag per title using the bundled parallel script. Use when the user asks about movie/TV prices, sales, price drops, price history, all-time lows, or what's cheap to buy or rent right now."
-version: 3.1.0
+version: 3.2.0
 license: MIT
 metadata:
   author: tracerman
@@ -35,6 +35,7 @@ python scripts/deals.py                        # all current deals (iTunes US), 
 python scripts/deals.py --since 1              # only items whose price changed today
 python scripts/deals.py --atl-only             # only rows at their all-time low
 python scripts/deals.py --title "Fight Club"   # single-title ATL check
+python scripts/deals.py --title "Fight Club" --history   # + full price-history timeline (sale windows, floor)
 python scripts/deals.py --type seasons         # TV seasons (also: rentalmovies)
 python scripts/deals.py --genre horror         # genre filter (case-insensitive, validated)
 python scripts/deals.py --max-price 4.99 --min-savings 3 --limit 30
@@ -70,7 +71,8 @@ Default sort is `latestPricechange` (freshest drops first). Output columns: Titl
 | "Rental price of [title]?" | Search -> Prices with `itemType=rentalmovies` | Rental vocabulary is empirically discovered, works on Deals/Prices |
 | "Complete series deals" | Deals `itemType=seasons`, filter `isBundle=1` client-side | Season genre filter is broken ([#21](references/PITFALLS.md#21-genre-filter-is-broken-for-seasons-on-deals-charts-and-recommendations)) |
 | "Recommend a [genre] movie" | Recommendations with a specific genre | With `genre=All` it returns chart data ([#18](references/PITFALLS.md#18-recommendationsphp-may-return-chart-data-when-no-genre-filter-is-set)) |
-| "Is [title] at its ATL?" / "lowest ever?" | `deals.py --title` or DetailData `IsLowest` flags | Only DetailData exposes ATL; never parse `priceHdEvolution` ([#26](references/PITFALLS.md#26-pricehdevolution--pricesdevolution-deltas-do-not-reliably-reconstruct-absolute-price-history)) |
+| "Is [title] at its ATL?" / "lowest ever?" | `deals.py --title` or DetailData `IsLowest` flags | Only DetailData exposes ATL; the flags beat parsing ([#26](references/PITFALLS.md#26-pricehdevolution--pricesdevolution-values-are-absolute-prices-not-deltas)) |
+| "When was [title] on sale?" / "price history" / "when will it be on sale again?" | `deals.py --title "<name>" --history` | Renders the full timeline with sale windows + historical floor; predict the next window from the cadence + the seasonal calendar in [EXTRAS.md](references/EXTRAS.md#seasonal-sales-calendar-itunes--apple-tv) |
 | "What just came off a sale?" | DetailData on candidates; report `priceBefore < price` rows | Sale-ended rows are "next drop target" signal ([#31](references/PITFALLS.md#31-pricebefore--price-is-signal-not-noise---it-means-the-sale-just-ended)) |
 | Compare across all 4 stores | Search -> 4x Prices calls, or Topseller | Note Movies Anywhere implications ([EXTRAS.md](references/EXTRAS.md#movies-anywhere-compatibility)) |
 
@@ -82,7 +84,7 @@ Full list of 37 with evidence and dates: [references/PITFALLS.md](references/PIT
 2. **Always check `status` before iterating `results`** - errors return `{"status":"error"}` with an empty result shape that mimics "no deals" ([#15](references/PITFALLS.md#15-always-check-responsestatus-before-iterating-results)).
 3. **`has4K=1` is silently ignored** on Deals/Charts - filter client-side ([#16](references/PITFALLS.md#16-has4k1-filter-does-not-work-on-dealscharts)).
 4. **`genre` is broken for seasons** everywhere, and unknown genre values on movies silently return EVERYTHING ([#21](references/PITFALLS.md#21-genre-filter-is-broken-for-seasons-on-deals-charts-and-recommendations), [#22](references/PITFALLS.md#22-genre-filter-silently-falls-back-to-all-for-unknown-values-on-buymovies)).
-5. **Never reconstruct price history from `priceHdEvolution`** - use the `IsLowest` flags ([#26](references/PITFALLS.md#26-pricehdevolution--pricesdevolution-deltas-do-not-reliably-reconstruct-absolute-price-history)).
+5. **`priceHdEvolution` values are absolute prices, NOT deltas** - the sign is only the change direction; summing them produces garbage. For "at ATL now?" use the `IsLowest` flags; for timelines use `--history`, which parses it correctly ([#26](references/PITFALLS.md#26-pricehdevolution--pricesdevolution-values-are-absolute-prices-not-deltas)).
 6. **No batch DetailData** - ATL enrichment is N+1 by design; use the parallel script ([#28](references/PITFALLS.md#28-there-is-no-batch-detaildata-endpoint)).
 7. **Never fabricate store URLs** - `productPageUrl`/`iTunesUrl`/`cheapChartsProductPageUrl` are in the response; guessed Apple TV slugs 404 ([#32](references/PITFALLS.md#32-never-fabricate-store-direct-urls---the-response-always-has-them)).
 8. **Sort choice = category filter:** `greatestSavings` surfaces bundles, `latestPricechange` surfaces individual movies ([#35](references/PITFALLS.md#35-sortgreatestsavings-puts-bundles-at-the-top-sortlatestpricechange-puts-individual-movies-at-the-top)).

@@ -86,31 +86,31 @@ Returns: `{"results":{"seasons":{...}}}` (key matches the `itemType` you passed)
 | `priceSd` / `priceHd` | Current SD/HD price |
 | `priceSdBefore` / `priceHdBefore` | Previous price before last change |
 | `priceSdLastChangeDate` / `priceHdLastChangeDate` | Date of last price change |
-| `priceSdEvolution` / `priceHdEvolution` | Full price history as `date:+/-price~date:+/-price~...` string. `+` = price went up, `-` = price went down. See "Parsing priceHdEvolution" below - the delta convention is unreliable for reconstructing absolute prices; prefer the `IsLowest` flag. |
+| `priceSdEvolution` / `priceHdEvolution` | Full price history as `date:[+/-]price~...` string, newest first. Each value is the ABSOLUTE price effective from that date; the sign is only the change direction. See "Parsing priceHdEvolution" below. Absent on some titles/tiers (e.g. SD-only items have no HD evolution). |
 | `priceSdIsLowest` / `priceHdIsLowest` | `1` if current SD/HD price equals the all-time low across CheapCharts' tracked history for this title, else `0`. **This is the canonical ATL check - use it instead of parsing `priceHdEvolution`.** |
 | `priceSdIsBest` / `priceHdIsBest` | `1` if current SD/HD price equals the best (lowest) price within the current sale window (i.e. current ongoing sale's floor), else `0`. Distinct from `IsLowest` - `IsBest=1, IsLowest=0` means "lowest of THIS sale but a previous sale went lower." |
 | `priceSdDropIndicator` / `priceHdDropIndicator` | `1` if price rose at last change, `-1` if it dropped, `0` if unchanged. Useful for filtering "real drops" without comparing to `priceBefore`. |
 | `isBundle` / `isSeasonBundle` | Whether this is a season bundle |
 | `isSeasonComplete` | Whether all seasons are included |
-| `childSeasonsCount` | Number of child seasons in the bundle |
-| `bundleSavings` / `bundleSavingsHd` | Savings vs buying seasons individually at regular price |
+| `childSeasonsCount` | Number of child seasons in the bundle. **May be null even on genuine complete-series bundles** (verified 2026-07-02: Tom & Jerry Kids Show Complete Series returns `isSeasonBundle=1` but `childSeasonsCount=null`) |
+| `bundleSavings` / `bundleSavingsHd` | Savings vs buying seasons individually at regular price. **May be null on bundles** - treat as optional |
 | `saveOpportunity` / `saveOpportunityHd` | Same as bundleSavings |
 | `episodeCount` | Total episodes |
 | `advisoryRating` | Content rating (e.g. TV-14) |
 | `summary` | Full synopsis |
-| `seasonFamily` | Array of child seasons, each with `idInStore`, `title`, `priceSd`, `priceHd`, `priceSdEvolution`, `priceHdEvolution`, `cheapChartsProductPageUrl` |
+| `seasonFamily` | Array of child seasons, each with `idInStore`, `title`, `priceSd`, `priceHd`, `priceSdEvolution`, `priceHdEvolution`, `cheapChartsProductPageUrl`. **May be empty even on complete-series bundles** - don't rely on it for child-season pricing |
 | `productPageUrl` | Direct Apple TV / iTunes store URL |
 | `iTunesUrl` | iTunes URL |
 | `imageSmallUrl` / `imageMediumUrl` / `imageLargeUrl` | Cover art URLs |
 | `appleTvId` | Apple TV internal ID |
 
-**Parsing `priceHdEvolution` (low priority - prefer `priceHdIsLowest`):** Split on `~`, each segment is `YYYY-MM-DD:[+/-]price`. The last segment (rightmost) is the earliest historical price; the first segment is the most recent price change. Example:
+**Parsing `priceHdEvolution`:** Split on `~`, each segment is `YYYY-MM-DD:[+|-]price`, newest first. **Each value is the absolute price in effect from that date** - `+` means the price rose to that value, `-` means it dropped to it, and the rightmost (earliest) segment carries no sign because it's the initial tracked price. Real example (Bernie, verified live 2026-07-02):
 
 ```
-2026-05-20:+89.99~2026-05-12:-69.99~2026-04-01:-49.99~2022-02-09:89.99
+2026-06-23:-4.99~2026-05-06:+12.99~2026-05-01:-5.99~2026-04-14:+12.99~2026-04-10:-4.99~2026-03-20:+12.99~2026-03-13:-8.99~2026-02-17:12.99
 ```
 
-**Caveat:** the delta convention is inconsistent across titles - for some, the last segment is an absolute starting price (`2022-02-09:89.99` with no sign); for others, the deltas don't accumulate cleanly to the current price. Empirically, walking deltas from the oldest segment does NOT always reproduce `priceHd`/`priceSd`. **For ATL detection, use the `priceHdIsLowest` / `priceSdIsLowest` flags instead - they are authoritative** ([Pitfall #26](PITFALLS.md#26-pricehdevolution--pricesdevolution-deltas-do-not-reliably-reconstruct-absolute-price-history)). Only fall back to parsing `priceHdEvolution` if you need the absolute dollar amount of the historical low or the date it occurred, and validate the result against `priceHd` before trusting it.
+reads oldest-to-newest: listed at $12.99 (2026-02-17), dropped to $8.99, back to $12.99, dropped to $4.99, back to $12.99, dropped to $5.99, back to $12.99, dropped to $4.99 (current). The values are NEVER deltas - summing them produces garbage ([Pitfall #26](PITFALLS.md#26-pricehdevolution--pricesdevolution-values-are-absolute-prices-not-deltas)). Validation invariant: the newest segment equals the current `priceHd`/`priceSd` (the weekly CI canary checks this). For "is it at ATL" questions, prefer the `IsLowest` flags; for history timelines, use `python scripts/deals.py --title "<name>" --history`, which parses this format.
 
 ## Enum Values
 

@@ -7,9 +7,9 @@
 > **Maintenance rule: append only - never renumber.** Cross-references to
 > pitfall numbers exist in SKILL.md, RECIPES.md, and `scripts/deals.py`.
 > The weekly CI canary (`.github/scripts/canary_pitfalls.py`) re-tests the
-> load-bearing entries (#13, #16, #21, #23, #28) and opens an issue on drift.
+> load-bearing entries (#13, #16, #21, #23, #26, #28) and opens an issue on drift.
 
-The six pitfalls most likely to silently break a workflow: [#13](#13-detaildata-itemtype-is-movies-or-seasons---not-buymovies) (DetailData vocabulary), [#15](#15-always-check-responsestatus-before-iterating-results) (status check), [#16](#16-has4k1-filter-does-not-work-on-dealscharts) (has4K broken), [#21](#21-genre-filter-is-broken-for-seasons-on-deals-charts-and-recommendations) (seasons genre), [#26](#26-pricehdevolution--pricesdevolution-deltas-do-not-reliably-reconstruct-absolute-price-history) (evolution parsing), [#28](#28-there-is-no-batch-detaildata-endpoint) (no batch DetailData).
+The six pitfalls most likely to silently break a workflow: [#13](#13-detaildata-itemtype-is-movies-or-seasons---not-buymovies) (DetailData vocabulary), [#15](#15-always-check-responsestatus-before-iterating-results) (status check), [#16](#16-has4k1-filter-does-not-work-on-dealscharts) (has4K broken), [#21](#21-genre-filter-is-broken-for-seasons-on-deals-charts-and-recommendations) (seasons genre), [#26](#26-pricehdevolution--pricesdevolution-values-are-absolute-prices-not-deltas) (evolution semantics), [#28](#28-there-is-no-batch-detaildata-endpoint) (no batch DetailData).
 
 ### 1. Using wrong itemType for Prices
 
@@ -111,9 +111,16 @@ Tested 2026-06-21: no `isMoviesAnywhere` field exists in any of Search, Deals, C
 
 Tested: `Charts?itemType=seasons&releaseYear=2025-2026` correctly returns seasons with release dates in that range. Confirms releaseYear is supported on Deals and Charts (already documented) but worth restating since the seasons endpoint's other filters are broken ([#21](#21-genre-filter-is-broken-for-seasons-on-deals-charts-and-recommendations)).
 
-### 26. priceHdEvolution / priceSdEvolution deltas do NOT reliably reconstruct absolute price history
+### 26. priceHdEvolution / priceSdEvolution values are absolute prices, not deltas
 
-The evolution string is documented as "date:[+/-]price" with the rightmost segment as the starting absolute price and earlier segments as deltas. Empirically (tested 2026-06-23): walking the deltas from the rightmost segment frequently produces a final price that does NOT match `priceHd` / `priceSd`. For example, Bernie (iTunes id 1875049429) has `priceHdEvolution=2026-06-23:-4.99~...~2026-02-17:12.99` and current `priceHd=4.99`, but summing the deltas from $12.99 forward gives $27.00 - not $4.99. The delta magnitudes/signs appear to be inconsistent across titles. **For ATL detection, always use `priceHdIsLowest` / `priceSdIsLowest` flags (authoritative).** Only fall back to parsing the evolution string if you also need the dollar amount or date of the historical low, and validate your reconstructed final price against `priceHd` / `priceSd` before reporting it.
+Format: `YYYY-MM-DD:[+|-]price~...`, newest segment first. **Each value is the ABSOLUTE price in effect from that date** - the `+`/`-` sign only marks the direction of the change (`+` rose to, `-` dropped to), and the rightmost segment (no sign) is the initial tracked price. Verified 2026-07-02 on Bernie (movies id 1875049429: `2026-06-23:-4.99~...~2026-02-17:12.99` reads "listed $12.99, ... dropped to $4.99" and reconciles exactly with `priceHd=4.99`, `priceHdBefore=12.99`) and on Tom & Jerry Kids Show: The Complete Series (seasons id 1550380051, 14 segments, all reconcile).
+
+**History of this pitfall:** an earlier version (tested 2026-06-23) claimed the values were per-change deltas that "don't accumulate" - summing Bernie's values gave $27.00 instead of $4.99. That was a misdiagnosis: summing absolute prices as if they were deltas produces exactly that garbage. The data was consistent all along; the mental model was wrong.
+
+Practical guidance:
+- **For "is it at ATL right now":** still use `priceHdIsLowest` / `priceSdIsLowest` - a single authoritative flag beats parsing.
+- **For "when was it on sale / what's the price history":** parse the evolution string with absolute-price semantics. The bundled script does this: `python scripts/deals.py --title "<name>" --history`.
+- **Validation invariant:** the newest segment's value must equal the current `priceHd`/`priceSd`. The weekly CI canary checks this on live data and opens an issue if the semantics ever drift.
 
 ### 27. IsLowest vs IsBest
 

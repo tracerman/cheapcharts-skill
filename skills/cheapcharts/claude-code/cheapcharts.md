@@ -24,13 +24,14 @@ Python 3.9+ with the standard library only. No API key needed.
 /cheapcharts type=seasons          # TV shows instead of movies
 /cheapcharts store=amazon          # Amazon instead of iTunes (prefer title= there)
 /cheapcharts title=Fight Club      # single-title ATL check
+/cheapcharts title=Fight Club history  # + full price-history timeline
 /cheapcharts genre=horror limit=20 # genre filter (any case - the script normalizes)
 /cheapcharts atl-only max_price=9.99  # ATL rows only, under $10
 ```
 
 ## What this command does
 
-1. Reads the user's request and maps it to script flags: `type=` -> `--type`, `store=` -> `--store`, `title=` -> `--title`, `since=` -> `--since`, `genre=` -> `--genre`, `limit=` -> `--limit`, `max_price=` -> `--max-price`, `atl-only` -> `--atl-only`.
+1. Reads the user's request and maps it to script flags: `type=` -> `--type`, `store=` -> `--store`, `title=` -> `--title`, `since=` -> `--since`, `genre=` -> `--genre`, `limit=` -> `--limit`, `max_price=` -> `--max-price`, `atl-only` -> `--atl-only`, `history` -> `--history` (with `title=`; use for "when was it on sale" / "price history" questions).
 2. Runs `python scripts/deals.py <flags>`. The script pulls the top deals sorted by `latestPricechange`, then verifies each candidate against the internal DetailData endpoint in parallel (8 workers, ~12s for 50 items) to get the authoritative `priceHdIsLowest` / `priceSdIsLowest` ATL flags and real change dates.
 3. Relays the script's markdown table. Exit codes: `0` deals found, `1` legitimately empty result (say so - don't call it an error), `2` API/usage error (report stderr).
 

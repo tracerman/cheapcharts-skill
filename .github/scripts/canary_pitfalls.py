@@ -108,6 +108,34 @@ def check_no_batch_detaildata():
     return "ok", "still no batch DetailData"
 
 
+def check_evolution_values_are_absolute():
+    """Pitfall #26: evolution segment values are absolute prices; the newest
+    segment must equal the current price. If this stops holding, the
+    --history feature and the pitfall text are stale."""
+    import re
+    deals = fetch(f"{GPT}/Deals.php?action=getDeals&store=itunes&country=us&itemType=buymovies&limit=10")
+    for item in deals.get("results", {}).get("buymovies", []):
+        url = item.get("cheapChartsProductPageUrl", "")
+        if "/movies/" not in url:
+            continue
+        sid = url.rsplit("/", 1)[-1].split("?")[0]
+        node = fetch(f"{BASE}/DetailData.php?store=itunes&country=us&itemType=movies&idInStore={sid}").get(
+            "results", {}).get("movies") or {}
+        for tier in ("Hd", "Sd"):
+            evo, current = node.get(f"price{tier}Evolution"), node.get(f"price{tier}")
+            if not evo or current is None:
+                continue
+            m = re.match(r"^(\d{4}-\d{2}-\d{2}):([+-]?)(\d+(?:\.\d+)?)", evo)
+            if not m:
+                return "drift", f"evolution string no longer parseable: {evo[:60]}"
+            newest = float(m.group(3))
+            if abs(newest - float(current)) > 0.001:
+                return "drift", (f"newest {tier} evolution segment ${newest} != current price "
+                                 f"${current} (id {sid}) - absolute-price semantics may have changed")
+            return "ok", f"newest {tier} segment ${newest} == current price (id {sid})"
+    return "error", "no candidate with an evolution string found to probe"
+
+
 def check_seasons_genre_still_broken():
     """Pitfall #21: genre is silently ignored for itemType=seasons."""
     horror = fetch(f"{GPT}/Deals.php?action=getDeals&store=itunes&country=us&itemType=seasons&genre=Horror&limit=15")
@@ -128,6 +156,7 @@ CHECKS = [
     check_has4k_filter_still_ignored,
     check_recommendations_rating_filter_still_ignored,
     check_no_batch_detaildata,
+    check_evolution_values_are_absolute,
     check_seasons_genre_still_broken,
 ]
 

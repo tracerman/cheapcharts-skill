@@ -25,6 +25,7 @@ script uses 8 concurrent workers by default).
 Usage:
     python deals.py                           # all current deals (iTunes), ATL flag shown
     python deals.py --title "Fight Club"      # single title lookup (always ATL-aware)
+    python deals.py --title "Fight Club" --history   # + full tracked price history timeline
     python deals.py --store amazon            # batch on a specific store
     python deals.py --store amazon --title "Fight Club"  # single lookup on a specific store
     python deals.py --type seasons            # TV season deals instead of movies
@@ -49,6 +50,7 @@ Exit codes:
 """
 
 import argparse
+import difflib
 import json
 import re
 import socket
@@ -166,8 +168,38 @@ def fetch_detail(itype, sid, store=DEFAULT_STORE, country=DEFAULT_COUNTRY):
     return data.get("results", {}).get(itype, {})
 
 
+def _norm_title(s):
+    """Normalize a title for matching: lowercase, '&' -> 'and', strip punctuation."""
+    s = (s or "").lower().replace("&", " and ")
+    return " ".join(re.findall(r"[a-z0-9]+", s))
+
+
+def score_match(query, title):
+    """Similarity score between a user query and a catalog title (0..~1.05).
+
+    Blends character similarity, token containment (does the title cover the
+    query's words?), and a bonus when the normalized query appears inside the
+    title. The containment direction is deliberately asymmetric: 'Tom and
+    Jerry Kids' should prefer 'Tom & Jerry Kids Show: The Complete Series'
+    over the shorter movie 'Tom & Jerry' that merely fits inside the query.
+    """
+    q, t = _norm_title(query), _norm_title(title)
+    if not q or not t:
+        return 0.0
+    ratio = difflib.SequenceMatcher(None, q, t).ratio()
+    q_tokens, t_tokens = set(q.split()), set(t.split())
+    containment = len(q_tokens & t_tokens) / len(q_tokens)
+    substr = 0.25 if q in t else 0.0
+    return 0.45 * ratio + 0.35 * containment + substr
+
+
 def search_id(title, store=DEFAULT_STORE, country=DEFAULT_COUNTRY):
     """Search for a title, return (itype, sid, error_msg) tuple.
+
+    Fetches several candidates and picks the best title match instead of
+    blindly trusting the API's first hit - Search ranking is fragile ('Tom
+    and Jerry Kids' top-ranks the unrelated 2021 movie 'Tom & Jerry').
+    Warns on stderr when the best match is weak, listing the alternatives.
 
     Returns (None, None, error_msg) on API error so caller can display it.
     Returns (None, None, None) if title simply not found.
@@ -175,7 +207,7 @@ def search_id(title, store=DEFAULT_STORE, country=DEFAULT_COUNTRY):
     """
     url = (
         f"{API_BASE}/gptapi/Search.php?action=search&store={store}"
-        f"&country={country}&itemType=all&query={quote(title)}&limit=1"
+        f"&country={country}&itemType=all&query={quote(title)}&limit=5"
     )
     data = fetch(url)
     if data.get("status") == "error":
@@ -183,8 +215,56 @@ def search_id(title, store=DEFAULT_STORE, country=DEFAULT_COUNTRY):
     results = data.get("results", [])
     if not results:
         return None, None, None
-    itype, sid = get_id_from_url(results[0].get("cheapChartsProductPageUrl", ""))
-    return itype, sid, None
+    ranked = sorted(results, key=lambda r: score_match(title, r.get("title")), reverse=True)
+    for candidate in ranked:
+        itype, sid = get_id_from_url(candidate.get("cheapChartsProductPageUrl", ""))
+        if itype and sid:
+            best_score = score_match(title, candidate.get("title"))
+            if best_score < 0.6 and len(ranked) > 1:
+                others = "; ".join(r.get("title") or "?" for r in ranked if r is not candidate)[:200]
+                print(f"  warning: weak title match for '{title}' - using '{candidate.get('title')}'",
+                      file=sys.stderr)
+                print(f"  other search hits: {others}", file=sys.stderr)
+            return itype, sid, None
+    return None, None, None
+
+
+def parse_evolution(evo):
+    """Parse a priceHd/SdEvolution string into [(date, direction, price)], newest first.
+
+    Format: `YYYY-MM-DD:[+|-]price~...`. Each value is the ABSOLUTE price in
+    effect from that date - the sign only marks the change direction ('+' rose,
+    '-' dropped, no sign = initial tracked price, rightmost segment). They are
+    NOT deltas; summing them produces garbage (see Pitfall #26). Verified
+    2026-07-02 against live data: the newest segment always equals the current
+    priceHd/priceSd. Malformed segments are skipped.
+    """
+    entries = []
+    for seg in (evo or "").split("~"):
+        m = re.match(r"^(\d{4}-\d{2}-\d{2}):([+-]?)(\d+(?:\.\d+)?)$", seg.strip())
+        if m:
+            entries.append((m.group(1), m.group(2), float(m.group(3))))
+    return entries
+
+
+def format_history_lines(evo, label):
+    """Render one tier's evolution string as indented timeline lines, oldest first.
+
+    Marks the historical floor rows so "when was it cheapest" is answerable at
+    a glance. Returns [] when there is no parseable history for this tier.
+    """
+    entries = parse_evolution(evo)
+    if not entries:
+        return []
+    chron = list(reversed(entries))
+    floor = min(price for _, _, price in chron)
+    lines = [f"    {label} price history ({len(chron)} changes, floor ${floor:g}):"]
+    for i, (date, sign, price) in enumerate(chron):
+        end = chron[i + 1][0] if i + 1 < len(chron) else "now"
+        event = {"": "listed at", "+": "rose to", "-": "dropped to"}[sign]
+        floor_tag = "  <-- historical floor" if price == floor and sign == "-" else ""
+        lines.append(f"      {date} -> {end}: {event} ${price:g}{floor_tag}")
+    return lines
 
 
 def is_atl(node):
@@ -192,8 +272,16 @@ def is_atl(node):
     return node.get("priceHdIsLowest") == 1 or node.get("priceSdIsLowest") == 1
 
 
-def check_single_title(title, store=DEFAULT_STORE, country=DEFAULT_COUNTRY):
-    """Resolve a title via Search, then check DetailData for ATL status."""
+def check_single_title(title, store=DEFAULT_STORE, country=DEFAULT_COUNTRY, show_history=False):
+    """Resolve a title via Search, then check DetailData for ATL status.
+
+    With show_history, also renders the tracked price-history timeline parsed
+    from priceHdEvolution / priceSdEvolution (absolute prices, Pitfall #26).
+    """
+    def flag(v):
+        # SD-only titles have no HD tier at all - render n/a, not a raw None
+        return "n/a" if v is None else v
+
     itype, sid, err = search_id(title, store, country)
     if err:
         print(f"  search error: {err}", file=sys.stderr)
@@ -210,9 +298,16 @@ def check_single_title(title, store=DEFAULT_STORE, country=DEFAULT_COUNTRY):
     if price is None:
         price = node.get("priceSd")
     print(f"  {node.get('title')}: ${price}")
-    print(f"    ATL (IsLowest):      hd={node.get('priceHdIsLowest')} sd={node.get('priceSdIsLowest')}")
-    print(f"    Current-sale floor (IsBest): hd={node.get('priceHdIsBest')} sd={node.get('priceSdIsBest')}")
+    print(f"    ATL (IsLowest):      hd={flag(node.get('priceHdIsLowest'))} sd={flag(node.get('priceSdIsLowest'))}")
+    print(f"    Current-sale floor (IsBest): hd={flag(node.get('priceHdIsBest'))} sd={flag(node.get('priceSdIsBest'))}")
     print(f"    Last change: {node.get('priceHdLastChangeDate') or node.get('priceSdLastChangeDate')}")
+    if show_history:
+        history = (format_history_lines(node.get("priceHdEvolution"), "HD")
+                   + format_history_lines(node.get("priceSdEvolution"), "SD"))
+        if history:
+            print("\n".join(history))
+        else:
+            print("    no tracked price history for this title")
     # Store links (from DetailData)
     product_url = node.get("productPageUrl")
     itunes_url = node.get("iTunesUrl")
@@ -458,6 +553,9 @@ def main():
         epilog="Combined filters example: python deals.py --genre Horror --max-price 4.99 --min-savings 3"
     )
     p.add_argument("--title", help="Check a single title (resolves via Search)")
+    p.add_argument("--history", action="store_true",
+                   help="With --title: also print the tracked price-history timeline "
+                        "(sale windows, historical floor) parsed from the evolution data")
     p.add_argument("--type", choices=("buymovies", "seasons", "rentalmovies"), default="buymovies",
                    help="Item type for batch mode (default: buymovies)")
     p.add_argument("--store", default=DEFAULT_STORE, help=f"Store (default: {DEFAULT_STORE})")
@@ -500,9 +598,13 @@ def main():
             return 2
         args.genre = genre
 
+    if args.history and not args.title:
+        print("  --history requires --title (history is a per-title lookup)", file=sys.stderr)
+        return 2
+
     try:
         if args.title:
-            return check_single_title(args.title, args.store, args.country)
+            return check_single_title(args.title, args.store, args.country, show_history=args.history)
         if args.store == "games":
             print("  CheapCharts Games has no public API (verified 2026-06-23).", file=sys.stderr)
             print("  For current game deals, see: https://games.cheapcharts.com", file=sys.stderr)

@@ -336,7 +336,17 @@ curl -s "https://buster.cheapcharts.de/v1/DetailData.php?store=itunes&country=us
 curl -s "https://buster.cheapcharts.de/v1/DetailData.php?store=itunes&country=us&itemType=seasons&idInStore=1606238021"
 ```
 
-The DetailData endpoint is NOT in the official gptapi surface (it was discovered by inspecting CheapCharts' website network calls). It returns the ATL flag (`priceHdIsLowest` / `priceSdIsLowest`), full price history, child seasons for bundles, and other fields the public gptapi endpoints don't expose. For ATL detection, always use the `IsLowest` flag - do not try to parse the `priceHdEvolution` string (Pitfall #26).
+The DetailData endpoint is NOT in the official gptapi surface (it was discovered by inspecting CheapCharts' website network calls). It returns the ATL flag (`priceHdIsLowest` / `priceSdIsLowest`), full price history, child seasons for bundles, and other fields the public gptapi endpoints don't expose. For "at ATL right now" checks use the `IsLowest` flag; for history timelines parse the `priceHdEvolution` / `priceSdEvolution` strings with absolute-price semantics (Pitfall #26) - or just use the script recipe below.
+
+---
+
+## "When was [title] on sale?" / price history timeline
+
+```bash
+python scripts/deals.py --title "Tom & Jerry Kids Complete Series" --history
+```
+
+Output includes every tracked price change as `date -> date: dropped to $X` rows with the historical floor marked. To predict the next sale, look at the cadence of past windows (Black Friday and holiday windows recur most reliably) plus the Seasonal Sales Calendar in [references/EXTRAS.md](references/EXTRAS.md#seasonal-sales-calendar-itunes--apple-tv).
 
 ---
 

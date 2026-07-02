@@ -64,6 +64,13 @@ Three layers:
 
 Noise controls are explicit flags: `--min-savings 1` skips sub-dollar "drops", `--exclude-bundles` removes multi-film collections, and `--since N` keeps only recent changes. The default shows everything so the ATL column can tell the real story.
 
+## What's new in v3.2
+
+- **`--history`** - `deals.py --title "<name>" --history` prints the full tracked price timeline: every sale window with dates, prices, and the historical floor marked. "When was it on sale and when might it be again?" is now a one-liner.
+- **Evolution semantics corrected** - the `priceHdEvolution` values are absolute prices with a direction sign, *not* deltas (verified on live data; [Pitfall #26](skills/cheapcharts/references/PITFALLS.md#26-pricehdevolution--pricesdevolution-values-are-absolute-prices-not-deltas) rewritten). The weekly canary now guards this invariant.
+- **Smarter title search** - `--title` fetches five candidates and picks the best title match instead of trusting the API's first hit ("Tom and Jerry Kids" used to silently return the unrelated 2021 *Tom & Jerry* movie), warning when the match is weak.
+- **Cleaner output** - SD-only titles render `hd=n/a` instead of a raw `None`.
+
 ## What's new in v3.1
 
 - **`--since N`** - filter to deals whose price actually changed in the last N days ("today's drops" is now one flag).
