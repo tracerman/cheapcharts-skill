@@ -17,7 +17,7 @@ Find items by title. Use this FIRST when you only have a title and need the IMDb
 **Required:** `action=search`, `query=<title>` (or `searchTerm=<title>` - alias, per vendor's llms.txt)
 **Optional:** `store=itunes` (default), `country=us` (default), `itemType=all` (default), `limit=20` (default 20, max 20), `offset=0` (paging offset for results beyond limit)
 
-Returns flat list: `{"status":"success","results":[...items...]}`. Each item includes `imdbId` (if available), `mediaType`, `itemType`, `priceFollowUpItemType`, `store`, `country`, `cheapChartsProductPageUrl`, `title`, `artist`, `releaseDate`, `releaseYear`, `currency`, `price`, `currentPrice`, `has4K`, `hdrFormat`, `imdbRating`, `rottenTomatoesRating` (see Common Item Fields below).
+Returns flat list: `{"status":"success","results":[...items...]}`. Each item includes `imdbId` (if available), `mediaType`, `itemType`, `priceFollowUpItemType`, `store`, `country`, `cheapChartsProductPageUrl`, `title`, `artist`, `releaseDate`, `releaseYear`, `price`, `currentPrice`, `has4K`, `hdrFormat`, `imdbRating`, `rottenTomatoesRating` (see Common Item Fields below). Search currency is store-dependent and may be absent; use the follow-up DetailData/Deals field ([Pitfall #40](PITFALLS.md#40-deals-and-detaildata-carry-currency-search-currency-is-not-reliable)).
 
 ## 2. Charts - `Charts.php`
 
@@ -33,7 +33,7 @@ Returns: `{"status":"success","results":{"buymovies":[...]}}`. Items include `ra
 Current deals and price drops. Best for bargain hunting.
 
 **Required:** `action=getDeals`, `store`, `country`, `itemType` (buymovies or seasons)
-**Optional:** `genre=All`, `quality=hd4k`, `sort=latestPricechange`, `maxPrice`, `releaseYear` (format: `2020-2025` - single year like `2026-2026` works too; default: all years), `limit`, `imdbRating` (min rating 0-10, default 0 = no filter, e.g. `imdbRating=7`), `rottenTomatoesRating` (min score 0-100, default 0 = no filter, e.g. `rottenTomatoesRating=80`), `has4K=1` (DOES NOT WORK - ignored, filter client-side instead, [Pitfall #16](PITFALLS.md#16-has4k1-filter-does-not-work-on-dealscharts))
+**Optional:** `genre=All`, `quality=hd4k` (`quality=4k` is verified for `buymovies` only; seasons+4k errors), `sort=latestPricechange`, `maxPrice`, `releaseYear` (format: `2020-2025` - single year like `2026-2026` works too; default: all years), `limit`, `imdbRating` (min rating 0-10, default 0 = no filter, e.g. `imdbRating=7`), `rottenTomatoesRating` (min score 0-100, default 0 = no filter, e.g. `rottenTomatoesRating=80`), `has4K=1` (DOES NOT WORK - ignored; use `quality=4k` for new movie Deals requests, or filter an already-fetched response client-side, [Pitfall #16](PITFALLS.md#16-has4k1-filter-does-not-work-on-dealscharts))
 
 **Sort options:** `latestPricechange` (default), `price`, `greatestSavings`, `greatestPercentageSavings`, `popularity`, `alphabetical`, `releaseDate` (ascending only - see [Pitfall #11](PITFALLS.md#11-sortreleasedate-is-ascending-only))
 
@@ -47,7 +47,7 @@ Look up current prices for specific titles by IMDb ID.
 
 **Required:** `action=getPrices`, `store`, `country`, `itemType=buymovies`, `imdbIDs` (comma-separated, e.g. `tt0468569,tt2911666`)
 
-Note: llms.txt Common Parameters list `seasons` as valid for Prices, but the Prices-specific param table and empirical testing confirm only `buymovies` works - see [Pitfall #7](PITFALLS.md#7-seasonsbundles-lack-imdb-ids---prices-api-explicitly-rejects-seasons). `rentalmovies` also works for rental prices (empirically discovered).
+Note: llms.txt Common Parameters list `seasons` as valid for Prices, but the Prices-specific param table and empirical testing confirm only `buymovies` works - see [Pitfall #7](PITFALLS.md#7-seasonsbundles-lack-imdb-ids---prices-api-explicitly-rejects-seasons). Do not use `rentalmovies`: Prices ignores it and returns purchase data under `results.buymovies` ([Pitfall #38](PITFALLS.md#38-rentalmovies-is-not-a-supported-public-api-price-mode)).
 
 Returns: `{"status":"success","results":{"buymovies":[...]}}`. Same item shape as Deals.
 
@@ -130,12 +130,12 @@ reads oldest-to-newest: listed at $12.99 (2026-02-17), dropped to $8.99, back to
 | Value | Meaning | Used by |
 |---|---|---|
 | `buymovies` | Movies (purchase prices) | Charts, Deals, Prices, Recommendations |
-| `rentalmovies` | Movies (rental prices, ~30 days to start, 48h to finish) | Charts, Deals, Prices (empirically discovered) |
+| `rentalmovies` | Unsupported rental-price request value | Recognized by `deals.py` only for a clear exit-2 capability error ([#38](PITFALLS.md#38-rentalmovies-is-not-a-supported-public-api-price-mode)) |
 | `seasons` | TV show seasons | Charts, Deals, Recommendations, DetailData |
 | `movies` | Movies (metadata in Search; price detail in DetailData) | Search, DetailData |
 | `all` | All media types (movies, seasons, ebooks, audiobooks, albums) | Search only |
 
-**Purchase vs rental (empirically discovered, NOT in current llms.txt):** The Prices endpoint's `itemType` parameter accepts `buymovies` (purchase price) or `rentalmovies` (rental price). Rentals are typically 30 days to start watching and 48 hours to finish once started. The Search endpoint can return either type - the `priceFollowUpItemType` field tells you which one to use in the follow-up Prices call. The `deals.py` script supports `--type rentalmovies` for batch rental deals. Note: the official llms.txt only documents `buymovies` and `seasons` as valid itemType values - `rentalmovies` was discovered empirically and works on Deals and Prices endpoints.
+**Rental limitation (verified 2026-07-17):** the public API does not expose a verified rental-price workflow. Deals and Charts reject `itemType=rentalmovies`; Prices accepts it syntactically but silently returns purchase data under `results.buymovies`. Search may emit `priceFollowUpItemType=rentalmovies`, but do not pass that value to Prices or present the result as a rental price. See [Pitfall #38](PITFALLS.md#38-rentalmovies-is-not-a-supported-public-api-price-mode).
 
 ### Genre
 
@@ -152,10 +152,12 @@ Unknown values silently fall back to "All" - they do NOT error ([Pitfall #22](PI
 | Value | Meaning |
 |---|---|
 | `hd4k` | HD and 4K (default) |
-| `hd` | HD only |
-| `sd` | SD only |
+| `hd` | HD-capable (4K titles may also appear) |
+| `sd` | SD tier (titles may also offer HD) |
 | `4k` | 4K only |
 | `sdOnly` | SD only (strict) |
+
+Live verification on 2026-07-17 confirmed these values for `buymovies` Deals ([Pitfall #39](PITFALLS.md#39-quality-filters-work-on-buymovies-deals-use-them-instead-of-has4k1)). Seasons support is narrower: omitted/default, `hd`, `sd`, and `sdOnly` succeed, but `quality=4k` errors. In `deals.py`, `sd` and `sdOnly` select DetailData's SD price, prior price, change date, and selected-tier ATL result. `hd4k`, `hd`, and movie `4k` prefer HD fields and fall back to SD only when HD is unavailable. JSON exposes factual `is_atl_hd` and `is_atl_sd` flags plus `selected_tier` and selected-tier `is_atl`.
 
 ## Common Item Fields
 
@@ -164,7 +166,7 @@ Unknown values silently fall back to "All" - they do NOT error ([Pitfall #22](PI
 | `title` | yes | Movie or TV season title |
 | `artist` | yes | Director (movies) or creator (TV) - may be empty string |
 | `cheapChartsProductPageUrl` | yes | Direct link to CheapCharts page - **always include this when showing results** |
-| `currency` | yes | Currency code (USD, EUR, etc.) |
+| `currency` | endpoint-dependent | Currency code (USD, EUR, etc.); present on Deals and DetailData, but not reliable on Search ([#40](PITFALLS.md#40-deals-and-detaildata-carry-currency-search-currency-is-not-reliable)) |
 | `price` | yes | Current HD purchase price (reflects quality parameter default; per llms.txt) |
 | `priceBefore` | no | Previous price before last change |
 | `releaseDate` | yes | Original release date |
@@ -183,7 +185,7 @@ Unknown values silently fall back to "All" - they do NOT error ([Pitfall #22](PI
 | `itemType` | Search only | Same media category repeated for agent compatibility |
 | `store` | Search only | Store used for the search |
 | `country` | Search only | Country used for the search |
-| `priceFollowUpItemType` | Search only | Use this as itemType for Prices API follow-up. Can be `buymovies` OR `rentalmovies` (rentalmovies empirically discovered, NOT in current llms.txt) |
+| `priceFollowUpItemType` | Search only | Use for a Prices follow-up only when it is `buymovies`; `rentalmovies` does not produce rental data ([#38](PITFALLS.md#38-rentalmovies-is-not-a-supported-public-api-price-mode)) |
 | `currentPrice` | Search only | Alias for `price` in Search responses |
 | `releaseYear` | no | Release year, derived from releaseDate when available (Search responses) |
 

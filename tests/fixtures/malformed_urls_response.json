@@ -1,0 +1,14 @@
+{
+  "status": "success",
+  "results": {
+    "buymovies": [
+      {
+        "title": "Missing URL"
+      },
+      {
+        "title": "Unexpected URL Shape",
+        "cheapChartsProductPageUrl": "https://www.cheapcharts.com/us/itunes/books/123"
+      }
+    ]
+  }
+}

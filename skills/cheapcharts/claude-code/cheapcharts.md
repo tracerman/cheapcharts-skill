@@ -16,6 +16,13 @@ This command drives the bundled `scripts/deals.py` from the CheapCharts skill. L
 
 Python 3.9+ with the standard library only. No API key needed.
 
+The installed skill is the primary supported invocation. To enable this optional `/cheapcharts` alias, copy it after installing the skill:
+
+```bash
+mkdir -p ~/.claude/commands
+cp ~/.claude/skills/cheapcharts/claude-code/cheapcharts.md ~/.claude/commands/cheapcharts.md
+```
+
 ## Usage
 
 ```
@@ -25,22 +32,40 @@ Python 3.9+ with the standard library only. No API key needed.
 /cheapcharts store=amazon          # Amazon instead of iTunes (prefer title= there)
 /cheapcharts title=Fight Club      # single-title ATL check
 /cheapcharts title=Fight Club history  # + full price-history timeline
-/cheapcharts genre=horror limit=20 # genre filter (any case - the script normalizes)
+/cheapcharts genre=horror limit=20 # movie-only genre filter (any case - the script normalizes)
+/cheapcharts quality=sdOnly        # strict SD tier for price, date, and ATL
 /cheapcharts atl-only max_price=9.99  # ATL rows only, under $10
 ```
 
 ## What this command does
 
-1. Reads the user's request and maps it to script flags: `type=` -> `--type`, `store=` -> `--store`, `title=` -> `--title`, `since=` -> `--since`, `genre=` -> `--genre`, `limit=` -> `--limit`, `max_price=` -> `--max-price`, `atl-only` -> `--atl-only`, `history` -> `--history` (with `title=`; use for "when was it on sale" / "price history" questions).
+1. Reads the user's request and maps it to script flags:
+
+   | Alias argument | Script flag |
+   |---|---|
+   | `title=` | `--title` |
+   | `history` | `--history` (requires `title=`) |
+   | `type=` | `--type` |
+   | `store=` / `country=` | `--store` / `--country` |
+   | `since=` / `limit=` | `--since` / `--limit` |
+   | `sort=` | `--sort` |
+   | `genre=` | `--genre` (movies only; Pitfall #21) |
+   | `quality=` | `--quality` |
+   | `max_price=` / `min_savings=` | `--max-price` / `--min-savings` |
+   | `release_year=` | `--release-year` |
+   | `exclude-bundles` | `--exclude-bundles` |
+   | `atl-only` | `--atl-only` |
+   | `json` | `--json` |
+
 2. Runs `python scripts/deals.py <flags>`. The script pulls the top deals sorted by `latestPricechange`, then verifies each candidate against the internal DetailData endpoint in parallel (8 workers, ~12s for 50 items) to get the authoritative `priceHdIsLowest` / `priceSdIsLowest` ATL flags and real change dates.
-3. Relays the script's markdown table. Exit codes: `0` deals found, `1` legitimately empty result (say so - don't call it an error), `2` API/usage error (report stderr).
+3. Relays the script's markdown table. Exit codes: `0` deals found, `1` legitimately empty result (say so - don't call it an error), `2` API/usage/response-schema error (report stderr). JSON emptiness is always `[]` on stdout.
 
 ## When to use
 
 - "What's on sale on Apple TV?"
 - "What just dropped today?" (use `since=1`)
 - "Is [movie] at its lowest price ever?" (use `title=`)
-- "Best 4K movie deals under $10?"
+- "Best 4K movie deals under $10?" (use `quality=4k`; movie batches only)
 - "Complete series bundles on sale" (use `type=seasons`)
 
 ## Output format
@@ -57,10 +82,13 @@ The script emits this table (Title and Buy link to the Apple TV purchase page, H
 
 ## Deeper workflows
 
-The parent skill's `SKILL.md` has the decision table for API calls the script doesn't cover (charts, recommendations, cross-store comparison), and `references/PITFALLS.md` documents all 37 known API gotchas. Repo: https://github.com/tracerman/cheapcharts-skill
+The parent skill's `SKILL.md` has the decision table for API calls the script doesn't cover (charts, recommendations, cross-store comparison), and `references/PITFALLS.md` documents all 40 known API gotchas. Repo: https://github.com/tracerman/cheapcharts-skill
 
 ## Caveats
 
 - The DetailData endpoint (used for ATL detection) is unofficial - discovered by inspecting CheapCharts' website network calls. Reliable in practice, not promised stable.
 - CheapCharts' price data lags Apple's store by hours to a day. "Today" queries may return yesterday's drops during early US morning hours; `since=3` is a sensible fallback.
 - The `Was` column comes from the API's `priceBefore` and can occasionally be an inflated baseline. Use `--min-savings` to skip trivial drops, and sanity-check against the History link before buying.
+- Public CheapCharts endpoints do not expose verified rental prices. `type=rentalmovies` returns a clear capability error; do not substitute purchase data from Prices (Pitfall #38).
+- `quality=sd` and `quality=sdOnly` use the SD price/date/ATL tier; other supported quality modes prefer HD and fall back to SD only when HD is unavailable. `quality=4k` is movie-only; seasons+4k is rejected before networking (Pitfall #39).
+- Monetary output uses the Deals/DetailData response currency. `max_price=` and `min_savings=` amounts are in the selected store/country currency; the script never converts currencies (Pitfall #40).

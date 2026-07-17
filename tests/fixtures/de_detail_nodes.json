@@ -1,0 +1,24 @@
+{
+  "444": {
+    "title": "German Movie",
+    "currency": "EUR",
+    "priceHd": 4.99,
+    "priceSd": 3.99,
+    "priceHdBefore": 12.99,
+    "priceSdBefore": 9.99,
+    "priceHdIsLowest": 1,
+    "priceSdIsLowest": 0,
+    "priceHdIsBest": 1,
+    "priceSdIsBest": 1,
+    "priceHdLastChangeDate": "2026-07-17",
+    "priceSdLastChangeDate": "2026-07-17",
+    "priceHdEvolution": "2026-07-17:-4.99~2026-01-01:12.99",
+    "priceSdEvolution": "2026-07-17:-3.99~2026-01-01:9.99",
+    "has4K": 0,
+    "hdrFormat": "No HDR",
+    "hasAtmos": 0,
+    "productPageUrl": "https://tv.apple.com/de/movie/german-movie",
+    "iTunesUrl": "https://itunes.apple.com/de/movie/german-movie",
+    "cheapChartsProductPageUrl": "https://www.cheapcharts.com/de/itunes/movies/444"
+  }
+}

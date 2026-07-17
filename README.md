@@ -78,7 +78,7 @@ Noise controls are explicit flags: `--min-savings 1` skips sub-dollar "drops", `
 - **Stable ordering** - results come back in the API's sort order (parallel fetching used to scramble it).
 - **Genre validation** - `--genre horror` now normalizes to `Horror`; unknown genres error instead of silently returning every deal.
 - **Failure accounting** - failed DetailData lookups are counted and reported instead of silently dropped; transient errors retry.
-- **Leaner skill** - SKILL.md went from ~60KB to ~12KB via progressive disclosure; the 37-pitfall knowledge base now lives in [references/PITFALLS.md](skills/cheapcharts/references/PITFALLS.md) and is re-verified weekly by a CI canary.
+- **Leaner skill** - SKILL.md went from ~60KB to ~12KB via progressive disclosure; the 40-pitfall knowledge base now lives in [references/PITFALLS.md](skills/cheapcharts/references/PITFALLS.md), and its load-bearing assumptions are re-verified weekly by a CI canary.
 
 ## What's new in v3.0
 
@@ -110,12 +110,21 @@ iTunes and Apple TV are the same underlying catalog (Apple rebranded iTunes Movi
 **Claude Code (skill):**
 
 ```bash
+rm -rf /tmp/cheapcharts-skill
 git clone https://github.com/tracerman/cheapcharts-skill /tmp/cheapcharts-skill
 mkdir -p ~/.claude/skills
+rm -rf ~/.claude/skills/cheapcharts
 cp -r /tmp/cheapcharts-skill/skills/cheapcharts ~/.claude/skills/cheapcharts
 ```
 
-This installs the full package - SKILL.md, the reference files, and `scripts/deals.py`. (The old curl-one-file slash-command install is deprecated: it delivered a command that referenced a script it never downloaded. The [slash command](skills/cheapcharts/claude-code/cheapcharts.md) still exists as an optional alias, but it requires the skill above to be installed.)
+This idempotently installs the full package - SKILL.md, the reference files, and `scripts/deals.py`. The installed skill is the supported invocation: ask Claude for CheapCharts deals directly. The old curl-one-file slash-command install is deprecated because it delivered a command that referenced a script it never downloaded.
+
+To also install the optional `/cheapcharts` alias after installing the skill:
+
+```bash
+mkdir -p ~/.claude/commands
+cp ~/.claude/skills/cheapcharts/claude-code/cheapcharts.md ~/.claude/commands/cheapcharts.md
+```
 
 **Claude Desktop** requires a Pro/Max/Team/Enterprise plan with code execution enabled. Download [`cheapcharts-claude-desktop.zip`](https://github.com/tracerman/cheapcharts-skill/releases/latest/download/cheapcharts-claude-desktop.zip) (built automatically by the release workflow), then Settings > Features > Skills > Upload.
 
@@ -150,7 +159,7 @@ cheapcharts-skill/
         ├── README.md                  # per-skill landing page
         ├── references/
         │   ├── API.md                 # full endpoint/enum/field reference
-        │   ├── PITFALLS.md            # all 37 empirically-verified API pitfalls
+        │   ├── PITFALLS.md            # all 40 empirically-verified API pitfalls
         │   └── EXTRAS.md              # gift cards, Movies Anywhere, seasonal calendar
         ├── examples/
         │   ├── demo-movies-2026-06-24.png      # ATL movie deals (with IMDb + RT)

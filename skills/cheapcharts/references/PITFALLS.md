@@ -7,13 +7,13 @@
 > **Maintenance rule: append only - never renumber.** Cross-references to
 > pitfall numbers exist in SKILL.md, RECIPES.md, and `scripts/deals.py`.
 > The weekly CI canary (`.github/scripts/canary_pitfalls.py`) re-tests the
-> load-bearing entries (#13, #16, #21, #23, #26, #28) and opens an issue on drift.
+> load-bearing entries (#13, #16, #21, #23, #26, #28, #39) and opens an issue on drift.
 
-The six pitfalls most likely to silently break a workflow: [#13](#13-detaildata-itemtype-is-movies-or-seasons---not-buymovies) (DetailData vocabulary), [#15](#15-always-check-responsestatus-before-iterating-results) (status check), [#16](#16-has4k1-filter-does-not-work-on-dealscharts) (has4K broken), [#21](#21-genre-filter-is-broken-for-seasons-on-deals-charts-and-recommendations) (seasons genre), [#26](#26-pricehdevolution--pricesdevolution-values-are-absolute-prices-not-deltas) (evolution semantics), [#28](#28-there-is-no-batch-detaildata-endpoint) (no batch DetailData).
+The eight pitfalls most likely to silently break a workflow: [#13](#13-detaildata-itemtype-is-movies-or-seasons---not-buymovies) (DetailData vocabulary), [#15](#15-always-check-responsestatus-before-iterating-results) (status check), [#16](#16-has4k1-filter-does-not-work-on-dealscharts) (has4K broken), [#21](#21-genre-filter-is-broken-for-seasons-on-deals-charts-and-recommendations) (seasons genre), [#26](#26-pricehdevolution--pricesdevolution-values-are-absolute-prices-not-deltas) (evolution semantics), [#28](#28-there-is-no-batch-detaildata-endpoint) (no batch DetailData), [#38](#38-rentalmovies-is-not-a-supported-public-api-price-mode) (rental prices unavailable), and [#39](#39-quality-filters-work-on-buymovies-deals-use-them-instead-of-has4k1) (quality filter semantics).
 
 ### 1. Using wrong itemType for Prices
 
-Prices requires `buymovies` (not `movies`). Search returns `priceFollowUpItemType` - use that value for the Prices follow-up call.
+Prices requires `buymovies` (not `movies`). Search returns `priceFollowUpItemType`, but only use it for a Prices follow-up when the value is `buymovies`; `rentalmovies` is not a working rental-price mode ([Pitfall #38](#38-rentalmovies-is-not-a-supported-public-api-price-mode)).
 
 ### 2. Forgetting to URL-encode the query
 
@@ -73,7 +73,7 @@ Every endpoint returns `{"status":"success", ...}` on success or `{"status":"err
 
 ### 16. has4K=1 filter does NOT work on Deals/Charts
 
-Tested with iTunes US: passing `has4K=1` returns the same items with `has4K=0` in the response - the parameter is silently ignored. To filter to 4K-only deals, filter client-side after the API call (`if item.get('has4K') in (1, True): ...`). The field exists in item data (as `has4K`, `hasAtmos`, `hdrFormat`) but is not honored as a query parameter.
+Tested with iTunes US: passing `has4K=1` returns the same items with `has4K=0` in the response - the parameter is silently ignored. For a new `buymovies` Deals request, use the working server-side `quality=4k` filter instead ([Pitfall #39](#39-quality-filters-work-on-buymovies-deals-use-them-instead-of-has4k1)). Filter `has4K` client-side only when processing an already-fetched unfiltered response; continue filtering `hasAtmos` and `hdrFormat` client-side because they have no verified server parameters. The `has4K` field exists in item data but is not honored as a query parameter.
 
 ### 17. DetailData is unofficial
 
@@ -165,3 +165,17 @@ Verified 2026-06-24: Deals items return `isMovieBundle: 0` or `1` (an int), but 
 ### 37. imdbRating and rottenTomatoesRating are Deals candidate fields, not DetailData fields
 
 Verified 2026-06-24: Deals items have `imdbRating` and `rottenTomatoesRating` populated (e.g. *Django Unchained* returns `imdbRating: 8.5, rottenTomatoesRating: 87`); DetailData items do NOT (DetailData's node is price/history only). The script copies these into the output at the candidate-merge step. When building the report, render ratings for individual movies (where `isMovieBundle == 0`); for bundles and TV seasons, render `-` because the field is absent on the source data, not because of a script bug. Same applies to `imdbId`.
+
+### 38. rentalmovies is not a supported public-API price mode
+
+Verified 2026-07-17 against iTunes US: Deals and Charts reject `itemType=rentalmovies` with `itemType must be buymovies or seasons.` Prices is more dangerous: it returns `status=success` but ignores `rentalmovies`, puts purchase data under `results.buymovies`, and reported Inception's $9.99 purchase price in the probe. Search may still emit `priceFollowUpItemType=rentalmovies`, but that value does not unlock rental prices. Do not present Deals, Charts, Prices, or `deals.py` as a rental workflow. The CLI keeps `--type rentalmovies` only to return a clear exit-2 capability error before making a request. No public CheapCharts API rental-price workflow is currently verified.
+
+### 39. quality filters work on buymovies Deals; use them instead of has4K=1
+
+Verified 2026-07-17 against iTunes US `itemType=buymovies` Deals with `sort=alphabetical`: the omitted request and `quality=hd4k` returned identical lists; `quality=sd` and `quality=sdOnly` materially changed the results; and `quality=4k` returned 50/50 items with `has4K=1`, compared with only 8/50 in the omitted response. This is distinct from `has4K=1`, which is silently ignored ([Pitfall #16](#16-has4k1-filter-does-not-work-on-dealscharts)). Use `quality=4k` for a server-side 4K **movie** filter.
+
+The parameter space differs for seasons: `itemType=seasons&quality=4k` returned `status=error`, while omitted/default, `hd`, `sd`, and `sdOnly` requests succeeded in the same live review. `deals.py` therefore rejects seasons+4k before networking. For enriched output on supported combinations, `sd` and `sdOnly` use DetailData's SD price, prior price, change date, and `priceSdIsLowest`; `hd4k`, `hd`, and movie `4k` prefer the HD tier and fall back to SD only when HD is unavailable. JSON preserves both factual DetailData ATL flags and separately identifies the selected tier and selected-tier ATL result.
+
+### 40. Deals and DetailData carry currency; Search currency is not reliable
+
+Verified 2026-07-17: iTunes Germany Deals returned `currency: EUR` on every sampled item, and DetailData for the same title returned `currency: EUR` alongside its HD/SD prices and evolution history. Amazon Germany Search and DetailData also returned `EUR`; however, iTunes Germany Search identified the country but omitted the `currency` field. Use the Deals currency for batch prices and filters, and the DetailData currency for single-title and history output. Never depend on Search carrying currency, hard-code `$`, or infer a rental/conversion rate; the numeric values are already denominated in the response currency. If Deals or DetailData omits currency, `deals.py` falls back to the ISO currency mapped from the requested country across the full supported-country list; it does not convert the numeric amount.

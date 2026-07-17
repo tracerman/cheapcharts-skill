@@ -1,7 +1,7 @@
 ---
 name: cheapcharts
 description: "Look up digital movie and TV deals, prices, charts, and recommendations on iTunes/Apple TV, Amazon, Vudu, and Google Play via the free CheapCharts public API (no auth or API key). Produces a markdown deal table with an all-time-low (ATL) flag per title using the bundled parallel script. Use when the user asks about movie/TV prices, sales, price drops, price history, all-time lows, or what's cheap to buy or rent right now."
-version: 3.2.0
+version: 3.3.0
 license: MIT
 metadata:
   author: tracerman
@@ -36,8 +36,9 @@ python scripts/deals.py --since 1              # only items whose price changed 
 python scripts/deals.py --atl-only             # only rows at their all-time low
 python scripts/deals.py --title "Fight Club"   # single-title ATL check
 python scripts/deals.py --title "Fight Club" --history   # + full price-history timeline (sale windows, floor)
-python scripts/deals.py --type seasons         # TV seasons (also: rentalmovies)
-python scripts/deals.py --genre horror         # genre filter (case-insensitive, validated)
+python scripts/deals.py --type seasons         # TV seasons
+python scripts/deals.py --quality sdOnly       # strict SD results, using the SD price/date/ATL tier
+python scripts/deals.py --genre horror         # movie-only genre filter; other types rejected (Pitfall #21)
 python scripts/deals.py --max-price 4.99 --min-savings 3 --limit 30
 python scripts/deals.py --sort greatestSavings # bundles dominate this sort (Pitfall #35)
 python scripts/deals.py --exclude-bundles      # individual movies only (they carry ratings)
@@ -45,7 +46,7 @@ python scripts/deals.py --store amazon --title "Heat"   # non-iTunes: prefer --t
 python scripts/deals.py --json                 # machine-readable output for pipelines
 ```
 
-**Exit codes:** `0` deals found, `1` no deals matched (legitimate empty result), `2` API or usage error. Failed DetailData lookups are counted and reported in the table header; if all fail, exit is 2.
+**Exit codes:** `0` deals found, `1` no deals matched (legitimate API-empty or filtered-empty result), `2` API, usage, or response-schema error. In `--json` mode, empty results emit `[]` on stdout and diagnostics go to stderr. Failed DetailData lookups are counted and reported in the table header; if all fail, exit is 2.
 
 Default sort is `latestPricechange` (freshest drops first). Output columns: Title (links to Apple TV) | Fmt | Now | Was | Save | IMDb | RT | Date | ATL | Buy | History.
 
@@ -62,13 +63,13 @@ Default sort is `latestPricechange` (freshest drops first). Output columns: Titl
 | User asks... | Do this | Why |
 |---|---|---|
 | "Latest deals" / "today's drops" | `deals.py --since 1` | latestPricechange sort + DetailData date verification |
-| "Deals under $X" | `deals.py --max-price X` | maxPrice filters server-side |
+| "Deals under X" | `deals.py --max-price X` | maxPrice filters server-side in the selected store/country currency |
 | "Highly-rated deals" | Deals API with `imdbRating`/`rottenTomatoesRating` | Both filter server-side on Deals (NOT Recommendations, [Pitfall #23](references/PITFALLS.md#23-imdbrating-and-rottentomatoesrating-filters-work-on-dealscharts-but-not-on-recommendations)) |
-| "4K / Dolby Vision / Atmos on sale" | Deals API, then filter client-side | `has4K=1` param is ignored ([Pitfall #16](references/PITFALLS.md#16-has4k1-filter-does-not-work-on-dealscharts)) |
+| "4K / Dolby Vision / Atmos movie deals" | `deals.py --quality 4k`; filter Vision/Atmos client-side | Movie `quality=4k` works; `has4K=1` is ignored ([#39](references/PITFALLS.md#39-quality-filters-work-on-buymovies-deals-use-them-instead-of-has4k1), [#16](references/PITFALLS.md#16-has4k1-filter-does-not-work-on-dealscharts)) |
 | "Newest releases on sale" | Deals `sort=releaseDate` + strip placeholder dates | Ascending only ([#11](references/PITFALLS.md#11-sortreleasedate-is-ascending-only)); bundles carry fake 2030 dates ([#12](references/PITFALLS.md#12-bundle-placeholder-dates-pollute-releasedate-sort)) |
 | "What's popular / selling?" | Charts (one store) or Topseller (cross-store) | Topseller is the only multi-store batch endpoint |
-| "How much is [title]?" | Search -> Prices (use `priceFollowUpItemType`) | Search resolves the IMDb ID; iTunes = Apple TV ([#19](references/PITFALLS.md#19-apple-tv--itunes-terminology)) |
-| "Rental price of [title]?" | Search -> Prices with `itemType=rentalmovies` | Rental vocabulary is empirically discovered, works on Deals/Prices |
+| "How much is [title]?" | Search -> Prices only when `priceFollowUpItemType=buymovies` | Search resolves the IMDb ID; rental follow-ups are unsupported ([#38](references/PITFALLS.md#38-rentalmovies-is-not-a-supported-public-api-price-mode)); iTunes = Apple TV ([#19](references/PITFALLS.md#19-apple-tv--itunes-terminology)) |
+| "Rental price of [title]?" | Explain that no public-API rental price is available | Deals/Charts reject `rentalmovies`; Prices silently returns purchase data ([#38](references/PITFALLS.md#38-rentalmovies-is-not-a-supported-public-api-price-mode)) |
 | "Complete series deals" | Deals `itemType=seasons`, filter `isBundle=1` client-side | Season genre filter is broken ([#21](references/PITFALLS.md#21-genre-filter-is-broken-for-seasons-on-deals-charts-and-recommendations)) |
 | "Recommend a [genre] movie" | Recommendations with a specific genre | With `genre=All` it returns chart data ([#18](references/PITFALLS.md#18-recommendationsphp-may-return-chart-data-when-no-genre-filter-is-set)) |
 | "Is [title] at its ATL?" / "lowest ever?" | `deals.py --title` or DetailData `IsLowest` flags | Only DetailData exposes ATL; the flags beat parsing ([#26](references/PITFALLS.md#26-pricehdevolution--pricesdevolution-values-are-absolute-prices-not-deltas)) |
@@ -78,16 +79,19 @@ Default sort is `latestPricechange` (freshest drops first). Output columns: Titl
 
 ## Critical Pitfalls (the ones that silently break workflows)
 
-Full list of 37 with evidence and dates: [references/PITFALLS.md](references/PITFALLS.md).
+Full list of 40 with evidence and dates: [references/PITFALLS.md](references/PITFALLS.md).
 
 1. **DetailData speaks a different vocabulary:** `itemType=movies` or `seasons`, NOT `buymovies` - the wrong value errors, and looks like "no data" if you skip the status check ([#13](references/PITFALLS.md#13-detaildata-itemtype-is-movies-or-seasons---not-buymovies)).
 2. **Always check `status` before iterating `results`** - errors return `{"status":"error"}` with an empty result shape that mimics "no deals" ([#15](references/PITFALLS.md#15-always-check-responsestatus-before-iterating-results)).
-3. **`has4K=1` is silently ignored** on Deals/Charts - filter client-side ([#16](references/PITFALLS.md#16-has4k1-filter-does-not-work-on-dealscharts)).
-4. **`genre` is broken for seasons** everywhere, and unknown genre values on movies silently return EVERYTHING ([#21](references/PITFALLS.md#21-genre-filter-is-broken-for-seasons-on-deals-charts-and-recommendations), [#22](references/PITFALLS.md#22-genre-filter-silently-falls-back-to-all-for-unknown-values-on-buymovies)).
+3. **`has4K=1` is silently ignored** on Deals/Charts - use `quality=4k` for a new movie Deals request; filter `has4K` client-side only for an already-fetched unfiltered response, and keep Vision/Atmos client-side ([#16](references/PITFALLS.md#16-has4k1-filter-does-not-work-on-dealscharts), [#39](references/PITFALLS.md#39-quality-filters-work-on-buymovies-deals-use-them-instead-of-has4k1)).
+4. **`genre` is broken for seasons** everywhere; `deals.py` rejects `--genre` unless `--type buymovies`. Unknown genre values on movies silently return EVERYTHING at the API level, so the script rejects those too ([#21](references/PITFALLS.md#21-genre-filter-is-broken-for-seasons-on-deals-charts-and-recommendations), [#22](references/PITFALLS.md#22-genre-filter-silently-falls-back-to-all-for-unknown-values-on-buymovies)).
 5. **`priceHdEvolution` values are absolute prices, NOT deltas** - the sign is only the change direction; summing them produces garbage. For "at ATL now?" use the `IsLowest` flags; for timelines use `--history`, which parses it correctly ([#26](references/PITFALLS.md#26-pricehdevolution--pricesdevolution-values-are-absolute-prices-not-deltas)).
 6. **No batch DetailData** - ATL enrichment is N+1 by design; use the parallel script ([#28](references/PITFALLS.md#28-there-is-no-batch-detaildata-endpoint)).
 7. **Never fabricate store URLs** - `productPageUrl`/`iTunesUrl`/`cheapChartsProductPageUrl` are in the response; guessed Apple TV slugs 404 ([#32](references/PITFALLS.md#32-never-fabricate-store-direct-urls---the-response-always-has-them)).
 8. **Sort choice = category filter:** `greatestSavings` surfaces bundles, `latestPricechange` surfaces individual movies ([#35](references/PITFALLS.md#35-sortgreatestsavings-puts-bundles-at-the-top-sortlatestpricechange-puts-individual-movies-at-the-top)).
+9. **Rental prices are unavailable through the public API:** Deals/Charts reject `rentalmovies`, while Prices silently returns purchases ([#38](references/PITFALLS.md#38-rentalmovies-is-not-a-supported-public-api-price-mode)).
+10. **Movie `quality=` filters work on Deals:** use `quality=4k` instead of ignored `has4K=1`; seasons+4k is rejected, while supported SD modes use the SD DetailData tier ([#39](references/PITFALLS.md#39-quality-filters-work-on-buymovies-deals-use-them-instead-of-has4k1)).
+11. **Currency comes from the priced response:** Deals carries batch currency and DetailData carries single-title/history currency; Search currency is not reliable ([#40](references/PITFALLS.md#40-deals-and-detaildata-carry-currency-search-currency-is-not-reliable)).
 
 ## Presentation Guidelines
 
@@ -103,6 +107,7 @@ Full list of 37 with evidence and dates: [references/PITFALLS.md](references/PIT
 5. **Ratings come from Deals candidates, not DetailData** - render IMDb/RT only for individual movies (`isMovieBundle == 0`); bundles and seasons legitimately have none ([#37](references/PITFALLS.md#37-imdbrating-and-rottentomatoesrating-are-deals-candidate-fields-not-detaildata-fields)).
 6. **Filter noise:** Search with `itemType=all` returns ebooks/audiobooks/albums too - filter by `mediaType` unless asked otherwise.
 7. **Mention compounding savings when relevant:** gift-card stacking and seasonal sale windows are in [EXTRAS.md](references/EXTRAS.md).
+8. **Keep monetary units honest:** render the response currency; `--max-price` and `--min-savings` are amounts in the selected store/country currency, with no conversion.
 
 ## Verification Checklist
 
@@ -110,6 +115,8 @@ Full list of 37 with evidence and dates: [references/PITFALLS.md](references/PIT
 - [ ] Response `status == "success"` checked before iterating (Pitfall #15)
 - [ ] `itemType` vocabulary correct: `buymovies` for Deals/Charts/Prices, `movies`/`seasons` for DetailData (Pitfall #13)
 - [ ] Genre values from the enum only; omitted entirely for seasons (Pitfalls #21, #22)
+- [ ] Rental requests are reported as unsupported, never inferred from purchase data (Pitfall #38)
+- [ ] Price, prior price, date, and ATL all come from the requested quality tier (Pitfall #39)
 - [ ] ATL claims based on `priceHdIsLowest`/`priceSdIsLowest`, not parsed evolution strings (Pitfall #26)
 - [ ] Fake drops filtered (`priceBefore > price`, savings > $0) and sale-ended rows reported as such (Pitfalls #9, #31)
 - [ ] Buy/history links taken verbatim from the response (Pitfall #32)
@@ -121,7 +128,7 @@ Full list of 37 with evidence and dates: [references/PITFALLS.md](references/PIT
 - [`scripts/deals.py`](scripts/deals.py) - the parallel deal/ATL finder (primary tool; unit-tested, CI-canaried)
 - [`RECIPES.md`](RECIPES.md) - literal curl commands for every workflow + cron prompt templates
 - [`references/API.md`](references/API.md) - full endpoint/parameter/enum/field reference
-- [`references/PITFALLS.md`](references/PITFALLS.md) - all 37 empirically-verified API pitfalls
+- [`references/PITFALLS.md`](references/PITFALLS.md) - all 40 empirically-verified API pitfalls
 - [`references/EXTRAS.md`](references/EXTRAS.md) - gift-card stacking, Movies Anywhere, seasonal sale calendar, CheapCharts Games
 - [`examples/`](examples/) - real output screenshots
 
