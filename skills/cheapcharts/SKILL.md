@@ -1,7 +1,7 @@
 ---
 name: cheapcharts
 description: "Look up digital movie and TV deals, prices, charts, and recommendations on iTunes/Apple TV, Amazon, Vudu, and Google Play via the free CheapCharts public API (no auth or API key). Produces a markdown deal table with an all-time-low (ATL) flag per title using the bundled parallel script. Use when the user asks about movie/TV prices, sales, price drops, price history, all-time lows, or what's cheap to buy or rent right now."
-version: 3.2.0
+version: 3.3.0
 license: MIT
 metadata:
   author: tracerman
