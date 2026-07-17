@@ -42,3 +42,21 @@ jobs:
         run: pip install pytest
       - name: Unit tests (offline, fixture-based)
         run: pytest tests
+
+  windows-cp1252-smoke:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Exercise UTF-8 reconfigure from a cp1252 redirect
+        shell: pwsh
+        run: |
+          $env:PYTHONIOENCODING = "cp1252"
+          python skills/cheapcharts/scripts/deals.py --help > help.txt
+          python tests/windows_cp1252_smoke.py > table.md
+          if (-not (Select-String -Path table.md -SimpleMatch "✓" -Quiet)) {
+            throw "fixture render did not preserve the UTF-8 ATL checkmark"
+          }

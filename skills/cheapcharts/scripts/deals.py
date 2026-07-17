@@ -29,12 +29,12 @@ Usage:
     python deals.py --store amazon            # batch on a specific store
     python deals.py --store amazon --title "Fight Club"  # single lookup on a specific store
     python deals.py --type seasons            # TV season deals instead of movies
-    python deals.py --type rentalmovies       # rental movie deals
+    python deals.py --type rentalmovies       # exits 2: public API rental prices are unavailable
     python deals.py --sort greatestSavings    # sort by biggest savings (default: latestPricechange)
     python deals.py --genre Horror            # filter to a specific genre (case-insensitive)
     python deals.py --max-price 4.99          # only deals under $5
     python deals.py --release-year 2020-2025  # filter by release year range
-    python deals.py --quality 4k             # only 4K items
+    python deals.py --quality 4k             # only 4K movies (not supported for seasons)
     python deals.py --limit 30                # narrower deal pool
     python deals.py --min-savings 5           # only show items with $5+ savings
     python deals.py --since 1                 # only items whose price changed in the last day
@@ -46,12 +46,13 @@ Combined filters (per llms.txt guideline #11):
 Exit codes:
     0 - success (at least one deal returned, or single-title check completed)
     1 - no deals matched / single title not found
-    2 - API error
+    2 - API, usage, or response-schema error
 """
 
 import argparse
 import difflib
 import json
+import math
 import re
 import socket
 import sys
@@ -60,7 +61,7 @@ import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
-from urllib.parse import quote, urlencode
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit
 
 # The markdown table uses non-ASCII glyphs (the ATL checkmark). Windows consoles
 # and pipes default to cp1252, which cannot encode them and kills the whole run
@@ -77,6 +78,40 @@ DEFAULT_SORT = "latestPricechange"  # v3.0: time-sensitive by default; v2.x was 
 HTTP_TIMEOUT = 20
 MAX_WORKERS = 8
 
+CURRENCY_SYMBOLS = {
+    "USD": "$",
+    "EUR": "€",
+    "GBP": "£",
+    "JPY": "¥",
+    "AUD": "A$",
+    "CAD": "C$",
+    "CHF": "CHF ",
+    "RUB": "₽",
+    "TRY": "₺",
+    "PLN": "PLN ",
+    "INR": "₹",
+    "CNY": "CN¥",
+}
+
+COUNTRY_CURRENCIES = {
+    "us": "USD",
+    "de": "EUR",
+    "gb": "GBP",
+    "fr": "EUR",
+    "au": "AUD",
+    "ca": "CAD",
+    "at": "EUR",
+    "ch": "CHF",
+    "es": "EUR",
+    "pt": "EUR",
+    "ru": "RUB",
+    "jp": "JPY",
+    "tr": "TRY",
+    "pl": "PLN",
+    "in": "INR",
+    "cn": "CNY",
+}
+
 # Valid sort options for Deals endpoint (per llms.txt + empirically discovered)
 VALID_SORTS = (
     "latestPricechange",
@@ -86,6 +121,20 @@ VALID_SORTS = (
     "popularity",
     "alphabetical",
     "releaseDate",  # empirically discovered, ascending only (Pitfall #11)
+)
+
+TITLE_BATCH_ONLY_OPTIONS = (
+    "--type",
+    "--limit",
+    "--min-savings",
+    "--since",
+    "--sort",
+    "--genre",
+    "--max-price",
+    "--release-year",
+    "--quality",
+    "--exclude-bundles",
+    "--atl-only",
 )
 
 # Valid genres (per llms.txt)
@@ -247,7 +296,62 @@ def parse_evolution(evo):
     return entries
 
 
-def format_history_lines(evo, label):
+def format_money(value, currency, format_spec=""):
+    """Format a numeric amount with a known symbol or an ISO-code prefix."""
+    if value is None:
+        return "-"
+    code = (currency or "USD").upper()
+    prefix = CURRENCY_SYMBOLS.get(code, f"{code} ")
+    amount = format(value, format_spec) if format_spec else str(value)
+    return f"{prefix}{amount}"
+
+
+def positive_int(value):
+    """Argparse type for integer options whose valid domain starts at one."""
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be a positive integer") from exc
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed
+
+
+def positive_float(value):
+    """Argparse type for finite numeric options whose valid domain is greater than zero."""
+    try:
+        parsed = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be a positive number") from exc
+    if not math.isfinite(parsed) or parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a positive number")
+    return parsed
+
+
+def release_year_value(value):
+    """Argparse type for YYYY or ordered YYYY-YYYY ranges."""
+    match = re.fullmatch(r"(\d{4})(?:-(\d{4}))?", value)
+    if not match:
+        raise argparse.ArgumentTypeError("must be YYYY or YYYY-YYYY")
+    start, end = int(match.group(1)), int(match.group(2) or match.group(1))
+    if start > end:
+        raise argparse.ArgumentTypeError("range start must not exceed range end")
+    return value
+
+
+def supplied_long_options(argv):
+    """Return explicitly supplied --long-option names, including --name=value forms."""
+    return {token.split("=", 1)[0] for token in argv if token.startswith("--")}
+
+
+def resolve_currency(response_currency, country=DEFAULT_COUNTRY):
+    """Prefer a priced-response currency; otherwise use the supported-country fallback."""
+    if response_currency:
+        return str(response_currency).upper()
+    return COUNTRY_CURRENCIES.get((country or DEFAULT_COUNTRY).lower(), "USD")
+
+
+def format_history_lines(evo, label, currency="USD"):
     """Render one tier's evolution string as indented timeline lines, oldest first.
 
     Marks the historical floor rows so "when was it cheapest" is answerable at
@@ -258,12 +362,18 @@ def format_history_lines(evo, label):
         return []
     chron = list(reversed(entries))
     floor = min(price for _, _, price in chron)
-    lines = [f"    {label} price history ({len(chron)} changes, floor ${floor:g}):"]
+    lines = [
+        f"    {label} price history "
+        f"({len(chron)} changes, floor {format_money(floor, currency, 'g')}):"
+    ]
     for i, (date, sign, price) in enumerate(chron):
         end = chron[i + 1][0] if i + 1 < len(chron) else "now"
         event = {"": "listed at", "+": "rose to", "-": "dropped to"}[sign]
-        floor_tag = "  <-- historical floor" if price == floor and sign == "-" else ""
-        lines.append(f"      {date} -> {end}: {event} ${price:g}{floor_tag}")
+        floor_tag = "  <-- historical floor" if price == floor else ""
+        lines.append(
+            f"      {date} -> {end}: {event} "
+            f"{format_money(price, currency, 'g')}{floor_tag}"
+        )
     return lines
 
 
@@ -297,13 +407,15 @@ def check_single_title(title, store=DEFAULT_STORE, country=DEFAULT_COUNTRY, show
     price = node.get("priceHd")
     if price is None:
         price = node.get("priceSd")
-    print(f"  {node.get('title')}: ${price}")
+    currency = resolve_currency(node.get("currency"), country)
+    price_text = format_money(price, currency) if price is not None else "price unavailable"
+    print(f"  {node.get('title')}: {price_text}")
     print(f"    ATL (IsLowest):      hd={flag(node.get('priceHdIsLowest'))} sd={flag(node.get('priceSdIsLowest'))}")
     print(f"    Current-sale floor (IsBest): hd={flag(node.get('priceHdIsBest'))} sd={flag(node.get('priceSdIsBest'))}")
     print(f"    Last change: {node.get('priceHdLastChangeDate') or node.get('priceSdLastChangeDate')}")
     if show_history:
-        history = (format_history_lines(node.get("priceHdEvolution"), "HD")
-                   + format_history_lines(node.get("priceSdEvolution"), "SD"))
+        history = (format_history_lines(node.get("priceHdEvolution"), "HD", currency)
+                   + format_history_lines(node.get("priceSdEvolution"), "SD", currency))
         if history:
             print("\n".join(history))
         else:
@@ -334,7 +446,7 @@ def build_deals_url(item_type, store, country, limit, sort, genre=None,
         "sort": sort,
         "limit": limit,
     }
-    if genre and genre != "All":
+    if item_type == "buymovies" and genre and genre != "All":
         params["genre"] = genre
     if max_price is not None:
         params["maxPrice"] = max_price
@@ -343,6 +455,22 @@ def build_deals_url(item_type, store, country, limit, sort, genre=None,
     if quality and quality != "hd4k":
         params["quality"] = quality
     return f"{API_BASE}/gptapi/Deals.php?{urlencode(params)}"
+
+
+def select_price_tier(node, quality):
+    """Return one coherent DetailData price tier for the requested quality.
+
+    SD modes never borrow HD fields. Other modes prefer HD and fall back to SD
+    only when the HD tier is unavailable.
+    """
+    tier = "Sd" if quality in ("sd", "sdOnly") or node.get("priceHd") is None else "Hd"
+    return {
+        "price": node.get(f"price{tier}"),
+        "was": node.get(f"price{tier}Before"),
+        "change_date": node.get(f"price{tier}LastChangeDate"),
+        "is_atl": node.get(f"price{tier}IsLowest") == 1,
+        "tier": tier.lower(),
+    }
 
 
 def check_batch(item_type, store=DEFAULT_STORE, country=DEFAULT_COUNTRY, limit=DEFAULT_LIMIT,
@@ -354,6 +482,7 @@ def check_batch(item_type, store=DEFAULT_STORE, country=DEFAULT_COUNTRY, limit=D
     deals_url = build_deals_url(
         item_type, store, country, limit, sort, genre, max_price, release_year, quality
     )
+    sent_params = dict(parse_qsl(urlsplit(deals_url).query))
     data = fetch(deals_url)
     if data.get("status") != "success":
         msg = data.get("message", "unknown")
@@ -364,18 +493,32 @@ def check_batch(item_type, store=DEFAULT_STORE, country=DEFAULT_COUNTRY, limit=D
         return 2
     deals = data.get("results", {}).get(item_type, [])
     if not deals:
-        print(f"  no {item_type} deals returned")
+        if output_json:
+            print("[]")
+            print(f"  no {item_type} deals returned", file=sys.stderr)
+        else:
+            print(f"  no {item_type} deals returned")
         return 1
+    response_currency = next((d.get("currency") for d in deals if d.get("currency")), None)
+    request_currency = resolve_currency(response_currency, country)
 
     # Map each deal to (deal, itype, sid) up front
     candidates = []
+    unresolvable = 0
     for d in deals:
         itype, sid = get_id_from_url(d.get("cheapChartsProductPageUrl", ""))
         if not (itype and sid):
+            unresolvable += 1
             continue
         if exclude_bundles and d.get("isMovieBundle"):
             continue
         candidates.append((d, itype, sid))
+    if unresolvable == len(deals):
+        if output_json:
+            print("[]")
+        print(f"  none of {len(deals)} Deals items had a usable cheapChartsProductPageUrl "
+              "- response URL schema drift?", file=sys.stderr)
+        return 2
 
     # Parallel DetailData fetches. as_completed yields in COMPLETION order, so
     # rows carry their candidate index and get re-sorted afterwards - otherwise
@@ -397,21 +540,16 @@ def check_batch(item_type, store=DEFAULT_STORE, country=DEFAULT_COUNTRY, limit=D
             if not node or node.get("_error"):
                 failed += 1
                 continue
+            selected = select_price_tier(node, quality)
             # v3.0: by default, include all deals (ATL flag is shown as a column).
-            # --atl-only restores the v2.x behavior of dropping non-ATL rows.
-            if atl_only and not is_atl(node):
+            # --atl-only restores the v2.x behavior for the selected price tier.
+            if atl_only and not selected["is_atl"]:
                 continue
-            change_date = node.get("priceHdLastChangeDate") or node.get("priceSdLastChangeDate")
+            change_date = selected["change_date"]
             if since_days is not None and not within_days(change_date, since_days):
                 continue
-            # Explicit None checks: a legitimate $0.00 price is falsy and must
-            # not fall through to the other tier.
-            price = node.get("priceHd")
-            if price is None:
-                price = node.get("priceSd")
-            was = node.get("priceHdBefore")
-            if was is None:
-                was = node.get("priceSdBefore")
+            price = selected["price"]
+            was = selected["was"]
             if min_savings is not None and price is not None and was is not None:
                 try:
                     if float(was) - float(price) < min_savings:
@@ -433,14 +571,16 @@ def check_batch(item_type, store=DEFAULT_STORE, country=DEFAULT_COUNTRY, limit=D
                 "was": was,
                 "save": save_amount,
                 "save_pct": save_pct,
+                "currency": resolve_currency(node.get("currency") or d.get("currency"), country),
                 "change_date": change_date,
                 "is_atl_hd": node.get("priceHdIsLowest") == 1,
                 "is_atl_sd": node.get("priceSdIsLowest") == 1,
-                # Format (HD / 4K / SD) - the actual video quality tier of this title.
-                # Derived from DetailData's `has4K` flag; falls back to HD if a HD price
-                # exists, else SD.
-                "format": "4K" if node.get("has4K") in (1, True) else (
-                    "HD" if node.get("priceHd") is not None else "SD"
+                "selected_tier": selected["tier"],
+                "is_atl": selected["is_atl"],
+                # Format follows the selected price tier. Within the HD tier,
+                # DetailData's has4K flag distinguishes 4K from ordinary HD.
+                "format": "SD" if selected["tier"] == "sd" else (
+                    "4K" if node.get("has4K") in (1, True) else "HD"
                 ),
                 "hdr_format": node.get("hdrFormat"),
                 "has_atmos": node.get("hasAtmos") in (1, True),
@@ -472,14 +612,16 @@ def check_batch(item_type, store=DEFAULT_STORE, country=DEFAULT_COUNTRY, limit=D
         print(json.dumps(atl, indent=2))
     else:
         filter_desc = []
-        if genre and genre != "All":
-            filter_desc.append(f"genre={genre}")
-        if max_price is not None:
-            filter_desc.append(f"maxPrice=${max_price}")
-        if release_year:
-            filter_desc.append(f"releaseYear={release_year}")
-        if quality and quality != "hd4k":
-            filter_desc.append(f"quality={quality}")
+        if "genre" in sent_params:
+            filter_desc.append(f"genre={sent_params['genre']}")
+        if "maxPrice" in sent_params:
+            filter_desc.append(
+                f"maxPrice={format_money(sent_params['maxPrice'], request_currency)}"
+            )
+        if "releaseYear" in sent_params:
+            filter_desc.append(f"releaseYear={sent_params['releaseYear']}")
+        if "quality" in sent_params:
+            filter_desc.append(f"quality={sent_params['quality']}")
         if since_days is not None:
             filter_desc.append(f"since={since_days}d")
         if exclude_bundles:
@@ -495,8 +637,8 @@ def format_atl_markdown(atl, item_type, candidates_count, filter_desc, failed_co
     Columns: Title | Fmt | Now | Was | Save | IMDb | RT | Date | ATL | Buy | History
 
     Title links to the Apple TV purchase page (the most likely user action). The
-    ATL column shows a checkmark (✓) for titles currently at the all-time low
-    across CheapCharts' tracked history, or "-" otherwise. The
+    ATL column shows a checkmark (✓) when the selected price tier is currently
+    at the all-time low across CheapCharts' tracked history, or "-" otherwise. The
     Buy and History columns are short labels that point at the Apple TV and
     CheapCharts URLs respectively. Ratings are "-" for bundles/TV seasons (CheapCharts
     doesn't carry ratings for those item types).
@@ -514,16 +656,17 @@ def format_atl_markdown(atl, item_type, candidates_count, filter_desc, failed_co
         # Title links to Apple TV (most likely user action)
         buy = a.get("store_url")
         title_cell = f"[{title}]({buy})" if buy else title
-        fmt = (a.get("format") or "-").split()[0]  # "4K HDR" -> "4K"
+        fmt = a.get("format") or "-"
         price = a.get("price")
-        price_str = f"${price}" if price is not None else "-"
+        currency = a.get("currency") or "USD"
+        price_str = format_money(price, currency)
         was = a.get("was")
-        was_str = f"${was}" if was is not None else "-"
+        was_str = format_money(was, currency)
         # Use pre-computed save / save_pct from the atl dict
         save_amt = a.get("save")
         save_pct = a.get("save_pct")
         if save_amt is not None and save_pct is not None:
-            save_str = f"${save_amt:.2f} ({save_pct:.0f}%)"
+            save_str = f"{format_money(save_amt, currency, '.2f')} ({save_pct:.0f}%)"
         else:
             save_str = "-"
         # Ratings: "-" for bundles/TV (only individual movies carry them)
@@ -533,7 +676,7 @@ def format_atl_markdown(atl, item_type, candidates_count, filter_desc, failed_co
             imdb_cell = str(a.get("imdb_rating")) if a.get("imdb_rating") is not None else "-"
             rt_cell = str(a.get("rotten_tomatoes_rating")) if a.get("rotten_tomatoes_rating") is not None else "-"
         date_cell = a.get("change_date") or "-"
-        atl_cell = "✓" if (a.get("is_atl_hd") or a.get("is_atl_sd")) else "-"
+        atl_cell = "✓" if a.get("is_atl") else "-"
         buy_cell = f"[Buy]({buy})" if buy else "-"
         hist = a.get("url")
         hist_cell = f"[History]({hist})" if hist else "-"
@@ -557,27 +700,33 @@ def main():
                    help="With --title: also print the tracked price-history timeline "
                         "(sale windows, historical floor) parsed from the evolution data")
     p.add_argument("--type", choices=("buymovies", "seasons", "rentalmovies"), default="buymovies",
-                   help="Item type for batch mode (default: buymovies)")
+                   help="Item type for batch mode (default: buymovies). rentalmovies is "
+                        "recognized only to report that the public API lacks rental prices.")
     p.add_argument("--store", default=DEFAULT_STORE, help=f"Store (default: {DEFAULT_STORE})")
     p.add_argument("--country", default=DEFAULT_COUNTRY, help=f"Country code (default: {DEFAULT_COUNTRY})")
-    p.add_argument("--limit", type=int, default=DEFAULT_LIMIT,
+    p.add_argument("--limit", type=positive_int, default=DEFAULT_LIMIT,
                    help=f"Deals pool size for batch mode (default: {DEFAULT_LIMIT})")
-    p.add_argument("--min-savings", type=float, default=None,
-                   help="Only show ATL items with at least this $ savings vs priceBefore")
-    p.add_argument("--since", type=int, default=None, metavar="N",
+    p.add_argument("--min-savings", type=positive_float, default=None,
+                   help="Only show deals with at least this savings vs priceBefore, "
+                        "in the selected store/country currency.")
+    p.add_argument("--since", type=positive_int, default=None, metavar="N",
                    help="Only show deals whose last price change was within the last N days "
                         "(e.g. --since 1 for today's drops). Batch mode only.")
     p.add_argument("--sort", choices=VALID_SORTS, default=DEFAULT_SORT,
                    help=f"Sort order for Deals (default: {DEFAULT_SORT})")
     p.add_argument("--genre", default=None,
                    help="Filter by genre (e.g. Horror, Drama, SciFiFantasy; case-insensitive). "
-                        "Only honored on itemType=buymovies (Pitfall #21, #22).")
-    p.add_argument("--max-price", type=float, default=None,
-                   help="Filter to deals with current price at or below this USD amount.")
-    p.add_argument("--release-year", default=None,
+                        "Supported only with --type buymovies; other types are rejected "
+                        "(Pitfall #21). Unknown values are rejected (Pitfall #22).")
+    p.add_argument("--max-price", type=positive_float, default=None,
+                   help="Filter to deals at or below this amount in the selected "
+                        "store/country currency.")
+    p.add_argument("--release-year", type=release_year_value, default=None,
                    help="Filter by release year or range (e.g. 2026-2026, 2024-2026).")
     p.add_argument("--quality", choices=VALID_QUALITIES, default="hd4k",
-                   help="Quality filter (default: hd4k).")
+                   help="Server-side quality filter (default: hd4k). sd/sdOnly select the SD "
+                        "DetailData tier; hd4k/hd/4k prefer HD and fall back to SD. "
+                        "4k is supported only with --type buymovies.")
     p.add_argument("--exclude-bundles", action="store_true",
                    help="Skip multi-film collections (isMovieBundle=1). Useful when you "
                         "want individual movies with ratings - bundles don't carry IMDb/RT scores.")
@@ -587,9 +736,30 @@ def main():
     p.add_argument("--json", action="store_true", help="Emit JSON (batch mode only)")
     args = p.parse_args()
 
+    supplied = supplied_long_options(sys.argv[1:])
+    if args.title and args.type == "rentalmovies":
+        print("  --type rentalmovies is unavailable: Deals/Charts reject rentalmovies, "
+              "and Prices silently returns purchase data instead of rental prices "
+              "(Pitfall #38)", file=sys.stderr)
+        return 2
+
+    if args.title:
+        if "--json" in supplied:
+            print("  --json is batch-only and cannot be combined with --title", file=sys.stderr)
+            return 2
+        ignored = [option for option in TITLE_BATCH_ONLY_OPTIONS if option in supplied]
+        if ignored:
+            print(f"  warning: --title ignores batch-only option(s): {', '.join(ignored)}",
+                  file=sys.stderr)
+
+    if not args.title and args.genre and args.type != "buymovies":
+        print(f"  --genre requires --type buymovies; CheapCharts does not reliably apply "
+              f"genre to {args.type} results (Pitfall #21)", file=sys.stderr)
+        return 2
+
     # Validate genre before calling the API: unknown values are silently
     # treated as "All" server-side, which would return every deal unfiltered.
-    if args.genre:
+    if not args.title and args.genre:
         genre = normalize_genre(args.genre)
         if genre is None:
             print(f"  unknown genre '{args.genre}' (the API silently ignores unknown genres "
@@ -597,6 +767,18 @@ def main():
             print(f"  valid genres: {', '.join(VALID_GENRES)}", file=sys.stderr)
             return 2
         args.genre = genre
+
+    if not args.title and args.type == "seasons" and args.quality == "4k":
+        print("  --quality 4k is unsupported with --type seasons: CheapCharts Deals "
+              "rejects this combination. Omit --quality or use hd, sd, or sdOnly "
+              "(Pitfall #39)", file=sys.stderr)
+        return 2
+
+    if not args.title and args.type == "rentalmovies":
+        print("  --type rentalmovies is unavailable: Deals/Charts reject rentalmovies, "
+              "and Prices silently returns purchase data instead of rental prices "
+              "(Pitfall #38)", file=sys.stderr)
+        return 2
 
     if args.history and not args.title:
         print("  --history requires --title (history is a per-title lookup)", file=sys.stderr)

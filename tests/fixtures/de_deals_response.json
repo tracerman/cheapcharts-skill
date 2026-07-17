@@ -1,0 +1,19 @@
+{
+  "status": "success",
+  "results": {
+    "buymovies": [
+      {
+        "title": "German Movie",
+        "price": 4.99,
+        "priceBefore": 12.99,
+        "currency": "EUR",
+        "cheapChartsProductPageUrl": "https://www.cheapcharts.com/de/itunes/movies/444",
+        "isMovieBundle": 0,
+        "imdbId": "tt0000444",
+        "imdbRating": 7.4,
+        "rottenTomatoesRating": 82,
+        "genre": "Drama"
+      }
+    ]
+  }
+}

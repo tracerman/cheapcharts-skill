@@ -45,7 +45,7 @@ jobs:
           code=$?
           set -e
           if [ "$code" -ge 2 ]; then exit "$code"; fi
-          python -c "import json; data=json.load(open('deals.json')); assert isinstance(data, list); print(f'OK: {len(data)} items')"
+          python -c "import json,sys; data=json.load(open('deals.json')); code=int(sys.argv[1]); assert isinstance(data, list); assert code != 1 or data == []; print(f'OK: exit {code}, {len(data)} items')" "$code"
 
       - name: Single-title lookup (exit 1 = not in catalog = OK)
         run: |

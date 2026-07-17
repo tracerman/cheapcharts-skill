@@ -52,7 +52,7 @@ curl -s "https://buster.cheapcharts.de/v1/DetailData.php?store=itunes&country=us
 ## "Find deals on 4K action movies under $5"
 
 ```bash
-curl -s "https://buster.cheapcharts.de/v1/gptapi/Deals.php?action=getDeals&store=itunes&country=us&itemType=buymovies&genre=ActionAdventure&quality=hd4k&sort=greatestSavings&maxPrice=4.99&limit=20"
+curl -s "https://buster.cheapcharts.de/v1/gptapi/Deals.php?action=getDeals&store=itunes&country=us&itemType=buymovies&genre=ActionAdventure&quality=4k&sort=greatestSavings&maxPrice=4.99&limit=20"
 ```
 
 ---
@@ -65,10 +65,10 @@ curl -s "https://buster.cheapcharts.de/v1/gptapi/Deals.php?action=getDeals&store
 
 ---
 
-## "4K Dolby Vision + Atmos movies on sale" (filter client-side - see Pitfall #16)
+## "4K Dolby Vision + Atmos movies on sale" (4K server-side; Vision/Atmos client-side)
 
 ```bash
-curl -s "https://buster.cheapcharts.de/v1/gptapi/Deals.php?action=getDeals&store=itunes&country=us&itemType=buymovies&genre=All&sort=greatestSavings&limit=50" | python -c "
+curl -s "https://buster.cheapcharts.de/v1/gptapi/Deals.php?action=getDeals&store=itunes&country=us&itemType=buymovies&genre=All&quality=4k&sort=greatestSavings&limit=50" | python -c "
 import sys, json
 items = json.load(sys.stdin)['results']['buymovies']
 premium = [i for i in items if i.get('has4K') in (1, True) and i.get('hasAtmos') in (1, True) and i.get('hdrFormat') == 'Dolby Vision']
@@ -107,8 +107,10 @@ done
 
 ## "Complete TV series on sale" (filter to bundle deals, avoid per-season noise)
 
+Do not add `genre`: CheapCharts ignores genre filters for seasons (Pitfall #21).
+
 ```bash
-curl -s "https://buster.cheapcharts.de/v1/gptapi/Deals.php?action=getDeals&store=itunes&country=us&itemType=seasons&genre=All&sort=greatestSavings&limit=50" | python -c "
+curl -s "https://buster.cheapcharts.de/v1/gptapi/Deals.php?action=getDeals&store=itunes&country=us&itemType=seasons&sort=greatestSavings&limit=50" | python -c "
 import sys, json
 items = json.load(sys.stdin)['results']['seasons']
 bundles = [i for i in items if i.get('isBundle') == 1]
@@ -166,7 +168,7 @@ Inline equivalent (sequential, slower):
 ```bash
 # Step 1 - pull the freshest drops (movies + seasons)
 curl -s "https://buster.cheapcharts.de/v1/gptapi/Deals.php?action=getDeals&store=itunes&country=us&itemType=buymovies&genre=All&sort=latestPricechange&limit=80"
-curl -s "https://buster.cheapcharts.de/v1/gptapi/Deals.php?action=getDeals&store=itunes&country=us&itemType=seasons&genre=All&sort=latestPricechange&limit=80"
+curl -s "https://buster.cheapcharts.de/v1/gptapi/Deals.php?action=getDeals&store=itunes&country=us&itemType=seasons&sort=latestPricechange&limit=80"
 
 # Step 2 - extract idInStore from cheapChartsProductPageUrl, then verify change date
 # CRITICAL: DetailData itemType is "movies" or "seasons", NOT "buymovies" (Pitfall #13)
@@ -193,8 +195,7 @@ python scripts/deals.py --type buymovies --limit 60 --atl-only --min-savings 5
 # Check TV seasons instead of movies
 python scripts/deals.py --type seasons --limit 30
 
-# Rental deals
-python scripts/deals.py --type rentalmovies --limit 30
+# Rental prices are unavailable through the public API (Pitfall #38).
 
 # Single title lookup
 python scripts/deals.py --title "Fight Club"
@@ -230,7 +231,7 @@ curl -s "https://buster.cheapcharts.de/v1/gptapi/Deals.php?action=getDeals&store
 ## "TV season releases from a specific year range"
 
 ```bash
-curl -s "https://buster.cheapcharts.de/v1/gptapi/Deals.php?action=getDeals&store=itunes&country=us&itemType=seasons&genre=All&releaseYear=2024-2026&sort=releaseDate&limit=50"
+curl -s "https://buster.cheapcharts.de/v1/gptapi/Deals.php?action=getDeals&store=itunes&country=us&itemType=seasons&releaseYear=2024-2026&sort=releaseDate&limit=50"
 ```
 
 ---
@@ -281,25 +282,9 @@ curl -s "https://www.imdb.com/title/tt0468569/" -A "Mozilla/5.0" \
 
 ---
 
-## Rental prices (verify and lookup)
+## Rental prices are unavailable through the public API
 
-The Prices endpoint's `itemType` parameter accepts `rentalmovies` for rental prices. The Search endpoint's `priceFollowUpItemType` field tells you which one to use.
-
-```bash
-# Step 1: Search to get the IMDb ID and priceFollowUpItemType
-curl -s "https://buster.cheapcharts.de/v1/gptapi/Search.php?action=search&store=itunes&country=us&itemType=all&query=Inception&limit=1"
-# Look at: results[0].priceFollowUpItemType - will be "buymovies" or "rentalmovies"
-```
-
-```bash
-# Step 2: Get the rental price for a specific title
-curl -s "https://buster.cheapcharts.de/v1/gptapi/Prices.php?action=getPrices&store=itunes&country=us&itemType=rentalmovies&imdbIDs=tt1375666"
-```
-
-```bash
-# Find all current rental deals (no rental-specific sort/filter - just use sort=greatestSavings)
-curl -s "https://buster.cheapcharts.de/v1/gptapi/Deals.php?action=getDeals&store=itunes&country=us&itemType=rentalmovies&sort=greatestSavings&limit=20"
-```
+Do not use `itemType=rentalmovies` with Deals, Charts, or Prices. Deals and Charts reject it; Prices silently returns purchase data under `results.buymovies`. Search's `priceFollowUpItemType=rentalmovies` is not a working rental-price follow-up. The bundled script recognizes `--type rentalmovies` only to return a clear exit-2 capability error. See [Pitfall #38](references/PITFALLS.md#38-rentalmovies-is-not-a-supported-public-api-price-mode).
 
 ---
 

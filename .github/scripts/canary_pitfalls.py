@@ -73,6 +73,30 @@ def check_has4k_filter_still_ignored():
     return "ok", f"has4K=1 still ignored ({len(non_4k)}/{len(items)} non-4K items in response)"
 
 
+def check_quality_filter_still_works():
+    """Pitfall #39: movie quality=4k works; seasons quality=4k is rejected."""
+    data = fetch(f"{GPT}/Deals.php?action=getDeals&store=itunes&country=us"
+                 f"&itemType=buymovies&quality=4k&limit=30")
+    if data.get("status") != "success":
+        return "error", f"quality=4k probe failed: {data.get('message', 'unknown error')}"
+    items = data.get("results", {}).get("buymovies", [])
+    if not items:
+        return "error", "no items returned for the quality=4k probe"
+    non_4k = [i for i in items if i.get("has4K") not in (1, True)]
+    if non_4k:
+        return "drift", (f"quality=4k returned {len(non_4k)}/{len(items)} non-4K items - "
+                         "the server-side filter may no longer work (Pitfall #39 stale)")
+    seasons = fetch(f"{GPT}/Deals.php?action=getDeals&store=itunes&country=us"
+                    f"&itemType=seasons&quality=4k&limit=5")
+    if seasons.get("status") == "success":
+        return "drift", ("seasons quality=4k now succeeds - the CLI guard and "
+                         "Pitfall #39 may be stale")
+    if seasons.get("status") != "error":
+        return "error", "seasons quality=4k probe returned neither success nor error"
+    return "ok", (f"movie quality=4k enforced ({len(items)}/{len(items)} items are 4K); "
+                  "seasons quality=4k still rejected")
+
+
 def check_recommendations_rating_filter_still_ignored():
     """Pitfall #23: imdbRating is silently ignored on Recommendations."""
     data = fetch(f"{GPT}/Recommendations.php?action=getRecommendations&store=itunes&country=us"
@@ -81,6 +105,8 @@ def check_recommendations_rating_filter_still_ignored():
     if not items:
         return "error", "no items returned for the Recommendations probe"
     rated = [i for i in items if i.get("imdbRating") is not None]
+    if not rated:
+        return "error", "Recommendations returned items but none carried imdbRating; filter behavior is untestable"
     below = [i for i in rated if float(i["imdbRating"]) < 8]
     if rated and not below:
         return "drift", ("Recommendations returned only IMDb>=8 items - "
@@ -138,22 +164,27 @@ def check_evolution_values_are_absolute():
 
 def check_seasons_genre_still_broken():
     """Pitfall #21: genre is silently ignored for itemType=seasons."""
-    horror = fetch(f"{GPT}/Deals.php?action=getDeals&store=itunes&country=us&itemType=seasons&genre=Horror&limit=15")
-    drama = fetch(f"{GPT}/Deals.php?action=getDeals&store=itunes&country=us&itemType=seasons&genre=Drama&limit=15")
-    h = [i.get("title") for i in horror.get("results", {}).get("seasons", [])]
-    d = [i.get("title") for i in drama.get("results", {}).get("seasons", [])]
-    if not h or not d:
-        return "error", "no season items returned for the genre probe"
-    if h != d:
-        return "drift", ("Horror and Drama season lists differ - "
-                         "the seasons genre filter may work now (Pitfall #21 stale)")
-    return "ok", "seasons genre filter still ignored (identical lists)"
+    url = (f"{GPT}/Deals.php?action=getDeals&store=itunes&country=us"
+           f"&itemType=seasons&genre={{genre}}&limit=15")
+    for attempt in range(2):
+        horror = fetch(url.format(genre="Horror"))
+        drama = fetch(url.format(genre="Drama"))
+        h = [i.get("title") for i in horror.get("results", {}).get("seasons", [])]
+        d = [i.get("title") for i in drama.get("results", {}).get("seasons", [])]
+        if not h or not d:
+            return "error", "no season items returned for the genre probe"
+        if h == d:
+            retry_note = " after mismatch retry" if attempt else ""
+            return "ok", f"seasons genre filter still ignored (identical lists{retry_note})"
+    return "drift", ("Horror and Drama season lists differed on both attempts - "
+                     "the seasons genre filter may work now (Pitfall #21 stale)")
 
 
 CHECKS = [
     check_deals_alive,
     check_detaildata_vocabulary,
     check_has4k_filter_still_ignored,
+    check_quality_filter_still_works,
     check_recommendations_rating_filter_still_ignored,
     check_no_batch_detaildata,
     check_evolution_values_are_absolute,
