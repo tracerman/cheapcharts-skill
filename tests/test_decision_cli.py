@@ -142,6 +142,52 @@ def test_trivial_drop_without_evolution_never_treats_prior_price_as_floor(monkey
     assert "historical floor is unknown" in position["reason"]
 
 
+def test_current_only_evolution_does_not_satisfy_historical_gate(monkeypatch, capsys):
+    case = load_json("decision_responses.json")["current_only"]
+    rc, captured = invoke_main(
+        monkeypatch, capsys, ["--decide", "Newly Tracked", "--json"], decision_router(case)
+    )
+
+    envelope = json.loads(captured.out)
+    assert rc == 1
+    assert envelope["state"] == "insufficient_evidence"
+    assert "verdict" not in envelope
+    assert envelope["offer"]["current_price"] == 14.99
+    assert any("historical comparator" in item for item in envelope["missing_requirements"])
+
+
+def test_comparator_adapter_keeps_older_repeats_of_current_floor():
+    comparators = deals.decision_comparators({
+        "evolution": (
+            "2026-07-18:-4.99~2026-05-01:+14.99~2026-03-01:-4.99~"
+            "2026-01-01:+14.99~2025-11-01:-4.99~2025-09-01:+14.99~"
+            "2025-07-01:-4.99~2025-05-01:+14.99~2025-03-01:-4.99~2025-01-01:14.99"
+        ),
+        "was": None,
+    })
+
+    assert len(comparators) == 4
+    assert all(item.price == 4.99 and item.kind == "historical_floor" for item in comparators)
+    assert {item.observed_on for item in comparators} == {
+        "2026-03-01", "2025-11-01", "2025-07-01", "2025-03-01",
+    }
+
+
+def test_authoritative_atl_and_lower_price_before_abstains(monkeypatch, capsys):
+    case = load_json("decision_responses.json")["atl_prior_conflict"]
+    rc, captured = invoke_main(
+        monkeypatch, capsys, ["--decide", "Sale Ended", "--json"], decision_router(case)
+    )
+
+    envelope = json.loads(captured.out)
+    assert rc == 1
+    assert envelope["state"] == "insufficient_evidence"
+    assert "verdict" not in envelope
+    assert envelope["conflicts"] == [
+        "authoritative ATL status conflicts with a lower trustworthy historical comparator"
+    ]
+
+
 @pytest.mark.parametrize("required_format", ["SD", "HD"])
 def test_required_format_is_minimum_and_does_not_force_lower_price_tier(
     monkeypatch, capsys, required_format
@@ -235,6 +281,37 @@ def test_unexpected_decision_failure_still_emits_error_envelope(monkeypatch, cap
     assert envelope["state"] == "error"
     assert envelope["error"]["message"] == "network exploded"
     assert "network exploded" in captured.err
+
+
+def test_games_decision_json_is_permanent_unsupported_without_fetch(monkeypatch, capsys):
+    rc, captured = invoke_main(
+        monkeypatch,
+        capsys,
+        ["--decide", "Heat", "--store", "games", "--json"],
+        lambda *_args, **_kwargs: pytest.fail("games capability must fail before Search"),
+    )
+
+    envelope = json.loads(captured.out)
+    assert rc == 2
+    assert envelope["state"] == "unsupported"
+    assert envelope["unsupported"]["capability"] == "store"
+    assert envelope["unsupported"]["value"] == "games"
+    assert envelope["unsupported"]["retryable"] is False
+    assert envelope["applied_scope"]["store"] == {"value": "games", "provenance": "user_set"}
+    assert "supported digital-video store" in envelope["next_action"]
+
+
+def test_games_factual_title_is_rejected_without_fetch(monkeypatch, capsys):
+    rc, captured = invoke_main(
+        monkeypatch,
+        capsys,
+        ["--title", "Heat", "--store", "games"],
+        lambda *_args, **_kwargs: pytest.fail("games capability must fail before factual Search"),
+    )
+
+    assert rc == 2
+    assert captured.out == ""
+    assert "CheapCharts Games has no public API" in captured.err
 
 
 @pytest.mark.parametrize(

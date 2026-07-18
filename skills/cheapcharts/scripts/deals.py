@@ -630,7 +630,10 @@ def decision_price_tier(node):
 
 def decision_comparators(selected):
     """Adapt selected-tier history into trustworthy floor/comparable evidence."""
-    entries = parse_evolution(selected.get("evolution"))
+    # Evolution is newest-first and its newest segment is the current price,
+    # not historical evidence. Only older observations can establish a prior
+    # floor or recurrence cadence.
+    entries = parse_evolution(selected.get("evolution"))[1:]
     comparators = []
     if entries:
         floor = min(price for _, _, price in entries)
@@ -1243,6 +1246,34 @@ def main():
         print("  --history requires --title (history is a per-title lookup)", file=sys.stderr)
         return 2
 
+    if args.store == "games":
+        message = "CheapCharts Games has no public API (verified 2026-06-23)."
+        if args.decide and args.json:
+            print_json_envelope({
+                "state": "unsupported",
+                "request": {"mode": "decide", "title": args.decide},
+                "applied_scope": decision_applied_scope(
+                    args.decide, args.store, args.country, args.budget, args.patience,
+                    args.required_format, args.intent, supplied,
+                ),
+                "unsupported": {
+                    "capability": "store",
+                    "value": "games",
+                    "message": message,
+                    "retryable": False,
+                },
+                "next_action": (
+                    "Choose a supported digital-video store, or visit "
+                    "https://games.cheapcharts.com for game prices."
+                ),
+            })
+        else:
+            print(f"  {message}", file=sys.stderr)
+            print("  For current game deals, see: https://games.cheapcharts.com", file=sys.stderr)
+            print("  Or use the CheapCharts Games mobile apps "
+                  "(iOS: id1622193150, Android: com.cheapcharts.cheapcharts_games).", file=sys.stderr)
+        return 2
+
     try:
         if args.decide:
             return check_decision(
@@ -1258,12 +1289,6 @@ def main():
             )
         if args.title:
             return check_single_title(args.title, args.store, args.country, show_history=args.history)
-        if args.store == "games":
-            print("  CheapCharts Games has no public API (verified 2026-06-23).", file=sys.stderr)
-            print("  For current game deals, see: https://games.cheapcharts.com", file=sys.stderr)
-            print("  Or use the CheapCharts Games mobile apps "
-                  "(iOS: id1622193150, Android: com.cheapcharts.cheapcharts_games).", file=sys.stderr)
-            return 2
         return check_batch(
             item_type=args.type,
             store=args.store,

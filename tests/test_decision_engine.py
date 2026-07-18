@@ -118,6 +118,41 @@ def test_prior_comparable_is_not_a_floor_when_authoritative_atl_is_false():
     assert "historical floor is unknown" in position["reason"]
 
 
+def test_current_price_without_any_older_anchor_is_insufficient_evidence():
+    result = decide(
+        offer=offer(current_price=14.99, regular_price=None),
+        history=(),
+        authoritative_atl=None,
+    )
+
+    assert result.state == "insufficient_evidence"
+    assert any("historical comparator" in item for item in result.missing_requirements)
+
+
+def test_authoritative_atl_conflicts_with_lower_prior_comparable():
+    result = decide(
+        offer=offer(current_price=14.99, regular_price=4.99),
+        history=(comparator(price=4.99, observed_on=None, kind="prior_comparable"),),
+        authoritative_atl=True,
+    )
+
+    assert result.state == "insufficient_evidence"
+    assert result.conflicts == (
+        "authoritative ATL status conflicts with a lower trustworthy historical comparator",
+    )
+
+
+def test_authoritative_atl_prior_comparator_uses_one_cent_tolerance():
+    result = decide(
+        offer=offer(current_price=14.99, regular_price=14.985),
+        history=(comparator(price=14.985, observed_on=None, kind="prior_comparable"),),
+        authoritative_atl=True,
+    )
+
+    assert result.state == "decision"
+    assert not result.evidence_coverage["conflicts"]
+
+
 def test_upgrade_intent_uses_stricter_offer_value_bar():
     result = decide(
         offer=offer(current_price=5.99, regular_price=7.99),

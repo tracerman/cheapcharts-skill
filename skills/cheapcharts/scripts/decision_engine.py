@@ -150,6 +150,10 @@ def _evidence_conflicts(
     declared_floors = [item.price for item in history if item.kind == "historical_floor"]
     if authoritative_atl is True and declared_floors and current_price > min(declared_floors) + 0.01:
         conflicts.append("authoritative ATL status conflicts with a lower trustworthy historical floor")
+    elif authoritative_atl is True:
+        lower_comparators = [item.price for item in history if current_price > item.price + 0.01]
+        if lower_comparators:
+            conflicts.append("authoritative ATL status conflicts with a lower trustworthy historical comparator")
     if authoritative_atl is False and declared_floors and current_price <= min(declared_floors) + 0.01:
         conflicts.append("authoritative non-ATL status conflicts with the trustworthy historical floor")
     return conflicts

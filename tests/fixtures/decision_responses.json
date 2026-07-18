@@ -13,7 +13,7 @@
       "priceHd": 4.99,
       "priceHdBefore": 14.99,
       "priceHdIsLowest": 1,
-      "priceHdEvolution": "2026-07-01:-4.99~2026-05-01:+14.99~2026-03-01:-4.99~2026-01-01:+14.99~2025-11-01:-4.99~2025-09-01:+14.99~2025-07-01:-4.99~2025-05-01:14.99",
+      "priceHdEvolution": "2026-07-01:-4.99~2026-05-01:+14.99~2026-03-01:-4.99~2026-01-01:+14.99~2025-11-01:-4.99~2025-09-01:+14.99~2025-07-01:-4.99~2025-05-01:+14.99~2025-03-01:-4.99~2025-01-01:14.99",
       "priceSd": 3.99,
       "priceSdBefore": 9.99,
       "priceSdIsLowest": 1,
@@ -89,6 +89,52 @@
       "has4K": 0,
       "productPageUrl": "https://tv.apple.com/us/movie/trivial-drop",
       "cheapChartsProductPageUrl": "https://www.cheapcharts.com/us/itunes/movies/334"
+    }
+  },
+  "current_only": {
+    "search": [
+      {
+        "title": "Newly Tracked",
+        "releaseYear": 2026,
+        "cheapChartsProductPageUrl": "https://www.cheapcharts.com/us/itunes/movies/335"
+      }
+    ],
+    "detail": {
+      "title": "Newly Tracked",
+      "currency": "USD",
+      "priceHd": 14.99,
+      "priceHdBefore": null,
+      "priceHdIsLowest": null,
+      "priceHdEvolution": "2026-07-18:14.99",
+      "priceSd": null,
+      "priceSdBefore": null,
+      "priceSdIsLowest": null,
+      "has4K": 0,
+      "productPageUrl": "https://tv.apple.com/us/movie/newly-tracked",
+      "cheapChartsProductPageUrl": "https://www.cheapcharts.com/us/itunes/movies/335"
+    }
+  },
+  "atl_prior_conflict": {
+    "search": [
+      {
+        "title": "Sale Ended",
+        "releaseYear": 2025,
+        "cheapChartsProductPageUrl": "https://www.cheapcharts.com/us/itunes/movies/336"
+      }
+    ],
+    "detail": {
+      "title": "Sale Ended",
+      "currency": "USD",
+      "priceHd": 14.99,
+      "priceHdBefore": 4.99,
+      "priceHdIsLowest": 1,
+      "priceHdEvolution": null,
+      "priceSd": null,
+      "priceSdBefore": null,
+      "priceSdIsLowest": null,
+      "has4K": 0,
+      "productPageUrl": "https://tv.apple.com/us/movie/sale-ended",
+      "cheapChartsProductPageUrl": "https://www.cheapcharts.com/us/itunes/movies/336"
     }
   },
   "ambiguous": {
