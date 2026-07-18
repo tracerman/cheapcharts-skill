@@ -4,9 +4,9 @@
 
 # CheapCharts Skill 
 
-> Agent skill for finding digital movie and TV deals across iTunes/Apple TV, Amazon, Vudu, and Google Play - with a markdown deal report that flags which drops are at their all-time low.
+> Agent skill for browsing digital movie and TV deals, inspecting one title's price evidence, and deciding Buy / Wait / Skip on a current offer across iTunes/Apple TV, Amazon, Vudu, and Google Play.
 
-CheapCharts shows price drops. This skill pulls the current deals for a store (iTunes has the deepest catalog; the other three are queryable per store or via Topseller), verifies each one against the historical price record (DetailData endpoint), and gives an agent a clean markdown table to answer questions like "what's the latest on Apple TV" or "what's actually at its lowest price ever."
+CheapCharts shows price drops. This skill pulls the current deals for a store (iTunes has the deepest catalog; the other three are queryable per store or via Topseller), verifies each one against the historical price record (DetailData endpoint), and gives an agent either a factual result or a transparent one-title purchase decision. Charts, Topseller, and Recommendations remain truthfully labeled discovery sources rather than being presented as deal feeds.
 
 <p>
   <a href="https://github.com/tracerman/cheapcharts-skill"><img src="https://img.shields.io/github/stars/tracerman/cheapcharts-skill?style=for-the-badge&logo=github&color=181717" alt="GitHub stars"></a>
@@ -24,12 +24,17 @@ CheapCharts shows price drops. This skill pulls the current deals for a store (i
 
 Installed as a skill, you don't touch the CLI. You ask, and the agent runs the script and reads back the result:
 
-- "What are the latest deals on Apple TV?"
-- "Has *The Thing* ever been cheaper than it is right now?"
+- **Browse:** "What are today's Apple TV movie deals under $10?"
+- **Inspect:** "Has *The Thing* ever been cheaper than it is right now?"
+- **Decide:** "Should I buy *The Thing* now? I only want 4K under $10."
 - "Any horror under $5 that's actually at its lowest price ever?"
 - "Best classic noir on Apple TV with a real deal on it right now?"
 
-The script emits a markdown table for direct use in reports, chat, and READMEs, plus JSON for cron pipelines. The same skill drives both a scheduled "post today's deals" job and an ad-hoc question.
+Specific requests execute directly. A bare invocation gets one compact orientation sentence, not a menu wizard. Compatible refinements inherit visible scope; Browse rows carry snapshot-bound title identity into factual or advisory follow-ups; “Back” restores the saved Browse criteria with refreshed prices.
+
+The script emits markdown for direct use in reports, chat, and READMEs, plus JSON for pipelines. Raw batch `--json` remains the compatible list/`[]` contract. `--scoped-json` adds a provenance-rich Browse envelope, while `--decide TITLE` and `--decide TITLE --json` produce human and structured one-title decision receipts. Factual `--title` behavior remains factual.
+
+Decision receipts separate objective deal strength from optional personal fit, show High/Medium/Low confidence with evidence coverage, and use visible neutral defaults for omitted budget, patience, format, or purchase/upgrade intent. A verdict requires a resolved offer, current quality-tier price, and trustworthy historical comparator. Skip is offer-specific; recurrence windows appear only when history supports them.
 
 ## Demo
 
@@ -56,11 +61,12 @@ The `ATL` column shows `✓` for titles currently at their all-time low and `-` 
 
 ## How it works
 
-Three layers:
+Four layers:
 
 - **Deals endpoint** returns the current deal list with prices, ratings, and category metadata. iTunes has the most complete catalog.
 - **DetailData endpoint** returns per-title price history with the `priceHdIsLowest` / `priceSdIsLowest` flags - the authoritative ATL signal.
 - **Script (`deals.py`)** fetches Deals, then hits DetailData in parallel (8 concurrent workers, ~12 seconds for 50 items) and merges the results into a single table, preserving the API's sort order.
+- **Adaptive skill contract** routes Browse / Inspect / Decide, preserves expressed scope and row identity, validates capability before widening, and derives human and structured results from one canonical applied scope.
 
 Noise controls are explicit flags: `--min-savings 1` skips sub-dollar "drops", `--exclude-bundles` removes multi-film collections, and `--since N` keeps only recent changes. The default shows everything so the ATL column can tell the real story.
 

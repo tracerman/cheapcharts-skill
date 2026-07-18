@@ -1,6 +1,6 @@
-# /cheapcharts - CheapCharts deal lookup
+# /cheapcharts - CheapCharts Browse / Inspect / Decide alias
 
-Query the CheapCharts public API for the latest price drops on iTunes/Apple TV, Amazon, Vudu, and Google Play. Returns a markdown deal table with all-time-low (ATL) flags.
+Route a natural CheapCharts request to Browse current deals, Inspect one title factually, or Decide Buy / Wait / Skip on one resolved offer across iTunes/Apple TV, Amazon, Vudu, and Google Play.
 
 ## Requirements
 
@@ -26,7 +26,10 @@ cp ~/.claude/skills/cheapcharts/claude-code/cheapcharts.md ~/.claude/commands/ch
 ## Usage
 
 ```
-/cheapcharts                       # latest Apple TV (iTunes US) deals, ATL column
+/cheapcharts                       # one-line orientation; do not run a default feed
+/cheapcharts today's Apple TV movie deals under $10
+/cheapcharts has Heat ever been cheaper?
+/cheapcharts should I buy Heat now?
 /cheapcharts since=1               # only items whose price changed in the last day
 /cheapcharts type=seasons          # TV shows instead of movies
 /cheapcharts store=amazon          # Amazon instead of iTunes (prefer title= there)
@@ -37,9 +40,12 @@ cp ~/.claude/skills/cheapcharts/claude-code/cheapcharts.md ~/.claude/commands/ch
 /cheapcharts atl-only max_price=9.99  # ATL rows only, under $10
 ```
 
+Specific natural-language requests bypass orientation and execute immediately when supported and sufficiently identified. Bare invocation says once: “I can show current movie or TV deals, inspect a title's price history, or help decide Buy / Wait / Skip—what are you looking for?” Do not expose discovery, capability, or session control as additional menu lanes.
+
 ## What this command does
 
-1. Reads the user's request and maps it to script flags:
+1. Infers the requested user job: a set/feed is **Browse**, a factual named-title question is **Inspect**, and purchase advice is **Decide**. Factual `title=` remains factual; do not attach an unsolicited verdict.
+2. Reads explicit arguments and maps them to script flags:
 
    | Alias argument | Script flag |
    |---|---|
@@ -56,9 +62,17 @@ cp ~/.claude/skills/cheapcharts/claude-code/cheapcharts.md ~/.claude/commands/ch
    | `exclude-bundles` | `--exclude-bundles` |
    | `atl-only` | `--atl-only` |
    | `json` | `--json` |
+   | `scoped-json` | `--scoped-json` (additive Browse envelope) |
+   | `decide=` | `--decide` |
+   | `budget=` / `patience=` | `--budget` / `--patience` |
+   | `required_format=` / `intent=` | `--required-format` / `--intent` |
 
-2. Runs `python scripts/deals.py <flags>`. The script pulls the top deals sorted by `latestPricechange`, then verifies each candidate against the internal DetailData endpoint in parallel (8 workers, ~12s for 50 items) to get the authoritative `priceHdIsLowest` / `priceSdIsLowest` ATL flags and real change dates.
-3. Relays the script's markdown table. Exit codes: `0` deals found, `1` legitimately empty result (say so - don't call it an error), `2` API/usage/response-schema error (report stderr). JSON emptiness is always `[]` on stdout.
+3. Runs `python scripts/deals.py <flags>`. Browse pulls the requested deal candidates and verifies ATL evidence in parallel. Inspect uses factual title/history mode. Decide uses `--decide TITLE` with any supplied constraints and returns a verdict only when title, current quality-tier price, and a trustworthy historical comparator are available.
+4. Relays the lane-appropriate output with a visible effective-scope receipt. Preserve existing Browse exit codes: `0` deals found, `1` legitimately empty, `2` API/usage/response-schema error. Raw batch `--json` remains a list and emits `[]` on empty; `--scoped-json` is the additive Browse envelope; `--decide TITLE --json` is the discriminated decision envelope whose explicit `state` distinguishes decision, disambiguation, insufficient evidence, not found, and error.
+
+Compatible elliptical refinements inherit the saved Browse frame and visibly identify non-obvious inherited values. Selecting a row pushes one title branch with snapshot-bound canonical identity. A stale `#3` after a newer result requires title confirmation. “Back” restores saved Browse criteria and refreshes live prices; “Start over” clears active frames and returns to orientation. Expressed scope controls durability, so title-local patience does not leak into the feed.
+
+Ask at most one blocking question, only when a default would materially misroute or misrepresent the request. Validate capability before fetching: native calls run normally; composable scopes disclose candidate coverage; partial pivots may show a limitation-first `degraded-results` preview only when meaningful scope survives; unsupported head constraints get one bounded remove-versus-pivot choice. Never substitute purchase data for rental prices or claim TV genre or seasons+4K was honored.
 
 ## When to use
 
@@ -67,6 +81,7 @@ cp ~/.claude/skills/cheapcharts/claude-code/cheapcharts.md ~/.claude/commands/ch
 - "Is [movie] at its lowest price ever?" (use `title=`)
 - "Best 4K movie deals under $10?" (use `quality=4k`; movie batches only)
 - "Complete series bundles on sale" (use `type=seasons`)
+- "Should I buy Heat now?" (use `decide=Heat`; add only the constraints the user supplied)
 
 ## Output format
 
@@ -87,7 +102,10 @@ The parent skill's `SKILL.md` has the decision table for API calls the script do
 ## Caveats
 
 - The DetailData endpoint (used for ATL detection) is unofficial - discovered by inspecting CheapCharts' website network calls. Reliable in practice, not promised stable.
-- CheapCharts' price data lags Apple's store by hours to a day. "Today" queries may return yesterday's drops during early US morning hours; `since=3` is a sensible fallback.
+- CheapCharts' price data lags Apple's store by hours to a day. An empty today result may justify one separately labeled `since=3` Nearby supplement.
+- For an explicit today request, `since=3` is only a separate labeled **Nearby: last 3 days** supplement. It never replaces today, changes the active frame, or runs more than once. Vague “latest” may widen once with both scopes shown.
+- Empty means a supported effective query matched nothing; error means data could not be obtained. Keep them distinct. Exact title/date nulls stay exact and are never widened silently.
+- Charts, Topseller, and Recommendations must be labeled **CheapCharts chart rankings**, **CheapCharts cross-store top sellers**, and **CheapCharts recommendations**. They are not Deals results.
 - The `Was` column comes from the API's `priceBefore` and can occasionally be an inflated baseline. Use `--min-savings` to skip trivial drops, and sanity-check against the History link before buying.
 - Public CheapCharts endpoints do not expose verified rental prices. `type=rentalmovies` returns a clear capability error; do not substitute purchase data from Prices (Pitfall #38).
 - `quality=sd` and `quality=sdOnly` use the SD price/date/ATL tier; other supported quality modes prefer HD and fall back to SD only when HD is unavailable. `quality=4k` is movie-only; seasons+4k is rejected before networking (Pitfall #39).

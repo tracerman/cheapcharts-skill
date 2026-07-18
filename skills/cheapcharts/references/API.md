@@ -10,6 +10,25 @@
 
 > **Common parameters:** Charts, Deals, Prices, and Recommendations share common parameters (`action`, `store`, `country`, `itemType`, `imdbRating`, `rottenTomatoesRating`). Search and Topseller have their own parameter sets (see their sections below).
 
+## Source semantics and adaptive routing
+
+The public endpoints provide evidence; they do not provide the skill's Browse / Inspect / Decide routing or its `applied_scope`. The host agent constructs those from the user's request and conversation context.
+
+| Source | Truthful user-facing label | Do not call it |
+|---|---|---|
+| Deals | CheapCharts deals / price drops | Charts, recommendations, or an exhaustive catalog |
+| Charts | CheapCharts chart rankings | Deals or verified price drops |
+| Recommendations | CheapCharts recommendations | Deals; rating filters are unreliable here |
+| Topseller | CheapCharts cross-store top sellers | Deals or a cross-store price comparison |
+| Search | CheapCharts title search candidates | A resolved title when plausible matches remain |
+| DetailData | CheapCharts title detail / tracked price history | An official endpoint or a future-price guarantee |
+
+Resolve factual title questions through Search plus the relevant price/detail evidence. Ambiguous Search candidates require disambiguation when identity would change the answer; a decision can never use evidence confidence to compensate for uncertain identity. Verified rental prices are unsupported, so never substitute a Prices purchase response.
+
+Capability validation precedes fetch, filtering, retry, or widening. Movie Deals quality filters are native; movie-bundles-only and complete-series-only are composable candidate scopes until catalog completeness is verified; rentals, TV genre, and seasons+4K are unsupported or unreliable. Every composable, dropped, or degraded dimension must be visible in the host-produced applied scope.
+
+The host's structured envelope records a complete canonical `applied_scope` with provenance such as `user_set`, `inherited`, `default`, or `dropped_unsupported`, plus any fallback window, substitution, or retry. These are wrapper-contract fields, not fields returned by the upstream endpoints. Existing raw batch `--json` remains a list/`[]`; scoped Browse output is additive through `--scoped-json`, and one-title decision JSON uses `--decide TITLE --json`.
+
 ## 1. Search - `Search.php`
 
 Find items by title. Use this FIRST when you only have a title and need the IMDb ID.
@@ -21,7 +40,7 @@ Returns flat list: `{"status":"success","results":[...items...]}`. Each item inc
 
 ## 2. Charts - `Charts.php`
 
-Current chart rankings for movies or TV seasons.
+Current CheapCharts chart rankings for movies or TV seasons. Label the result as chart rankings, never as a Deals feed.
 
 **Required:** `action=getCharts`, `store`, `country`, `itemType` (buymovies or seasons)
 **Optional:** `genre=All`, `quality=hd4k`, `limit`, `imdbRating` (min), `rottenTomatoesRating` (min), `releaseYear` (e.g. `2025-2025`)
@@ -53,7 +72,7 @@ Returns: `{"status":"success","results":{"buymovies":[...]}}`. Same item shape a
 
 ## 5. Recommendations - `Recommendations.php`
 
-Curated recommendations, filtered by genre and quality.
+CheapCharts recommendations, filtered by genre and quality. Label the result as recommendations, never as deals.
 
 **Required:** `action=getRecommendations`, `store`, `country`, `itemType` (buymovies or seasons)
 **Optional:** `genre=All`, `quality=hd4k`, `limit`, `imdbRating`, `rottenTomatoesRating`
@@ -64,7 +83,7 @@ Returns: `{"status":"success","results":{"buymovies":[...]}}`. Items may include
 
 ## 6. Topseller - `Topseller.php`
 
-Top sellers across multiple stores. Does NOT require `itemType`, `imdbRating`, or `rottenTomatoesRating` (unlike other endpoints).
+CheapCharts top sellers across multiple stores. Label the result as cross-store top sellers, never as deals or a cross-store price comparison. Does NOT require `itemType`, `imdbRating`, or `rottenTomatoesRating` (unlike other endpoints).
 
 **Required:** `action=getTopsellerForStartpage`, `country`, `store` (comma-separated, e.g. `itunes,amazon,vudu,googlePlay`)
 **Optional:** `maxItemCount=5` (default 5, per store per category)

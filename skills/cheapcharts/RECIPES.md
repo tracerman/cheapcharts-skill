@@ -17,6 +17,41 @@
 
 ---
 
+## Agent interaction recipes (Browse / Inspect / Decide)
+
+These are host-agent contract examples, not additional API endpoints. The agent should invoke the appropriate script/API workflow immediately and derive both human and structured output from one canonical applied scope.
+
+| Conversation | Route and required behavior |
+|---|---|
+| `/cheapcharts` | Bare invocation: show one natural orientation line, once per conversation. Do not run a default feed or show a numbered wizard. |
+| “Today's Apple TV movie deals under $10” | Browse directly. Scope: Deals source, iTunes/US, movies, today, price <= 10 in response currency; all request dimensions are `user_set`. |
+| “Has *Heat* ever been cheaper?” | Inspect. Resolve the title, use DetailData history/ATL evidence, and answer factually without Buy / Wait / Skip. |
+| “Should I buy *Heat* now?” | Decide. Resolve one offer, apply supplied constraints plus visible neutral defaults, and require current tier price plus a trustworthy historical comparator before a verdict. |
+| “Only 4K” after Browse | Refine the saved Browse frame. Change quality only; label inherited window, subtype, market, and price cap. |
+| “What about TV?” after movie-only 4K/genre Browse | Pivot. Clear sort. Name seasons+4K and TV genre casualties; show `degraded-results` only if meaningful supported scope survives, otherwise ask one bounded question before fetching. |
+| “Should I buy #3?” | Resolve row 3 against the rendered snapshot. If a newer snapshot exists, echo the likely title and confirm before deciding. |
+| “Back to the deals” | Pop the one-title branch, restore saved Browse criteria, refresh live prices, and fully re-echo scope. |
+| “Start over” | Clear active frames and return to the one-line orientation with visible market defaults. |
+| “What does *Heat* cost to rent?” | Return `unsupported`; public endpoints do not provide verified rental prices, and purchase data is not a substitute. |
+
+When explicit today is empty, say that nothing was recorded as changed today and note source lag. A single optional `--since 3` run is a structurally separate **Nearby: last 3 days** supplement with its own applied scope; it does not replace or mutate the active today frame. For vague “latest,” one labeled widening is allowed. Exact title/date questions never widen silently.
+
+Human scope receipts should be compact. Structured receipts record each dimension's value and provenance (`user_set`, `inherited`, `default`, or `dropped_unsupported`) and preserve fallback, substitution, and retry details. Existing raw batch `--json` stays a list/`[]`; do not assume it has been replaced by the scoped envelope.
+
+Approved CLI surfaces keep factual and advisory title work separate:
+
+```bash
+python scripts/deals.py --title "Heat"               # factual title/ATL lookup
+python scripts/deals.py --title "Heat" --history     # factual full timeline
+python scripts/deals.py --decide "Heat"              # human Buy / Wait / Skip receipt
+python scripts/deals.py --decide "Heat" --json       # decision/disambiguation/non-decision envelope
+python scripts/deals.py --scoped-json                 # additive scoped Browse envelope
+```
+
+Decision constraints are `--budget`, `--patience`, `--required-format`, and `--intent`. Omitted constraints use visible neutral defaults. Raw batch `--json` remains the compatibility list/`[]` mode.
+
+---
+
 ## One call per endpoint (quick smoke tests)
 
 ```bash
@@ -124,6 +159,8 @@ for i in bundles[:10]:
 
 ## "Cross-store top sellers today"
 
+Label this output **CheapCharts cross-store top sellers**, not “deals” or “price drops.” A `priceBefore` field can support a factual drop annotation for that item, but it does not turn the Topseller result set into a Deals feed.
+
 ```bash
 curl -s "https://buster.cheapcharts.de/v1/gptapi/Topseller.php?action=getTopsellerForStartpage&country=us&store=itunes,amazon,vudu,googlePlay&maxItemCount=5" | python -c "
 import sys, json
@@ -160,8 +197,10 @@ Prefer the script - it does all of this in parallel with a `--since` filter:
 
 ```bash
 python scripts/deals.py --since 1            # movies whose price changed today
-python scripts/deals.py --since 3 --type seasons
+python scripts/deals.py --since 3 --type seasons  # only a separately labeled wider scope
 ```
+
+For an explicit today request, do not silently replace an empty `--since 1` result with `--since 3`. Keep today active and, if useful, render the three-day call as one separate Nearby supplement.
 
 Inline equivalent (sequential, slower):
 
@@ -246,6 +285,8 @@ curl -s "https://buster.cheapcharts.de/v1/gptapi/Charts.php?action=getCharts&sto
 
 ## "Best sci-fi recommendations on Amazon with IMDb 7+"
 
+Label these as **CheapCharts recommendations**, never as deals. The API ignores recommendation rating filters in practice (Pitfall #23); if IMDb 7+ is essential, use and label a Deals query instead.
+
 ```bash
 curl -s "https://buster.cheapcharts.de/v1/gptapi/Recommendations.php?action=getRecommendations&store=amazon&country=us&itemType=buymovies&genre=SciFiFantasy&quality=hd4k&limit=15&imdbRating=7"
 ```
@@ -255,6 +296,8 @@ Note: Recommendations silently ignores `imdbRating` (Pitfall #23) - for a hard r
 ---
 
 ## "What's trending across all stores?"
+
+Label Topseller output **CheapCharts cross-store top sellers**. It is a popularity source, not a deal feed.
 
 ```bash
 curl -s "https://buster.cheapcharts.de/v1/gptapi/Topseller.php?action=getTopsellerForStartpage&country=us&store=itunes,amazon,vudu,googlePlay&maxItemCount=5"
@@ -375,8 +418,10 @@ Prompt: |
   Run: python scripts/deals.py --since 1 --limit 50
   Report the top 5 deals with title, price, prior price, savings %, IMDb rating,
   ATL flag, and the CheapCharts history link.
-  If the table is empty, fall back to: python scripts/deals.py --since 3 --limit 50
-  If still empty, stay silent (CheapCharts lags Apple by hours-to-a-day, Pitfall #14).
+  If the table is empty, report the exact today null and source-lag caveat first.
+  Optionally run: python scripts/deals.py --since 3 --limit 50
+  Render that only as a separate "Nearby: last 3 days" supplement with its own scope;
+  never replace the today result or widen again (Pitfall #14).
 ```
 
 **"Currently at ATL" monitoring** (titles at their all-time low right now, regardless of when they got there):
