@@ -161,7 +161,7 @@ VALID_GENRES = (
 VALID_QUALITIES = ("hd4k", "hd", "sd", "4k", "sdOnly")
 DECISION_PATIENCE = ("low", "balanced", "flexible")
 DECISION_FORMATS = ("SD", "HD", "4K")
-DECISION_INTENTS = ("new_purchase", "upgrade")
+DECISION_INTENTS = ("new", "new_purchase", "upgrade")
 
 
 def fetch(url, retries=2):
@@ -613,10 +613,9 @@ def resolve_decision_candidate(title, store, country):
     return "resolved", best
 
 
-def decision_price_tier(node, required_format):
-    """Select one coherent DetailData tier and label the actual offered format."""
-    quality = "sd" if required_format == "SD" else "hd"
-    selected = select_price_tier(node, quality)
+def decision_price_tier(node):
+    """Select the coherent offered tier; format requirements do not change pricing."""
+    selected = select_price_tier(node, None)
     api_tier = selected["tier"].title()
     selected["atl_signal"] = node.get(f"price{api_tier}IsLowest")
     selected["evolution"] = node.get(f"price{api_tier}Evolution")
@@ -703,6 +702,8 @@ def render_decision_human(envelope):
         f"Objective deal strength: {objective['label'].title()} "
         f"(transparent component score {objective['component_score']})."
     )
+    for evidence in envelope["decisive_evidence"]:
+        lines.append(f"  - {evidence}")
     personal = envelope["personal_fit"]
     lines.append(
         f"Personal fit: {personal['assessment'].replace('_', ' ')}; "
@@ -783,7 +784,7 @@ def check_decision(title, store=DEFAULT_STORE, country=DEFAULT_COUNTRY, budget=N
             }
             rc = 2
         else:
-            selected = decision_price_tier(node, required_format)
+            selected = decision_price_tier(node)
             scope["selected_tier"] = scope_value(selected["tier"], "derived")
             currency = resolve_currency(node.get("currency"), country)
             actual_title = node.get("title") or candidate["title"]
@@ -1149,8 +1150,8 @@ def main():
     p.add_argument("--patience", choices=DECISION_PATIENCE, default=None,
                    help="With --decide: low, balanced, or flexible waiting preference")
     p.add_argument("--required-format", type=str.upper, choices=DECISION_FORMATS, default=None,
-                   help="With --decide: require SD, HD, or 4K for this offer")
-    p.add_argument("--intent", choices=("new", "new_purchase", "upgrade"), default=None,
+                   help="With --decide: minimum acceptable capability (SD < HD < 4K)")
+    p.add_argument("--intent", choices=DECISION_INTENTS, default=None,
                    help="With --decide: new/new_purchase or upgrade intent")
     p.add_argument("--json", action="store_true",
                    help="Emit raw JSON rows in Browse, or the decision envelope with --decide")
@@ -1201,6 +1202,9 @@ def main():
     if args.title:
         if "--json" in supplied:
             print("  --json is batch-only and cannot be combined with --title", file=sys.stderr)
+            return 2
+        if "--scoped-json" in supplied:
+            print("  --scoped-json is Browse-only and cannot be combined with --title", file=sys.stderr)
             return 2
         ignored = [option for option in TITLE_BATCH_ONLY_OPTIONS if option in supplied]
         if ignored:

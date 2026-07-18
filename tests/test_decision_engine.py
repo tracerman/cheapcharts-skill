@@ -76,18 +76,46 @@ def test_weak_offer_is_offer_specific_skip():
     assert any("not a judgment of the title" in caveat for caveat in result.caveats)
 
 
-@pytest.mark.parametrize(
-    ("constraints", "reason"),
-    [
-        (PurchaseConstraints(budget_ceiling=3.99), "above the request budget"),
-        (PurchaseConstraints(required_format="HD"), "not the required HD"),
-    ],
-)
-def test_hard_personal_constraints_force_offer_specific_skip(constraints, reason):
-    result = decide(constraints=constraints)
+def test_budget_hard_constraint_forces_offer_specific_skip():
+    result = decide(constraints=PurchaseConstraints(budget_ceiling=3.99))
     assert result.verdict == "Skip"
-    assert reason in result.decisive_reason
+    assert "above the request budget" in result.decisive_reason
     assert result.personal_fit["hard_constraint_conflicts"]
+
+
+@pytest.mark.parametrize("required_format", ["SD", "HD", "4K"])
+def test_required_format_is_minimum_capability(required_format):
+    result = decide(constraints=PurchaseConstraints(required_format=required_format))
+
+    assert result.verdict == "Buy"
+    assert not result.personal_fit["hard_constraint_conflicts"]
+
+
+def test_offer_below_required_minimum_format_is_offer_specific_skip():
+    result = decide(
+        offer=offer(format_tier="HD"),
+        constraints=PurchaseConstraints(required_format="4K"),
+    )
+
+    assert result.verdict == "Skip"
+    assert "below the required minimum 4K format" in result.decisive_reason
+    assert result.personal_fit["hard_constraint_conflicts"]
+
+
+def test_prior_comparable_is_not_a_floor_when_authoritative_atl_is_false():
+    result = decide(
+        offer=offer(current_price=13.99, regular_price=14.99),
+        history=(comparator(price=14.99, observed_on=None, kind="prior_comparable"),),
+        authoritative_atl=False,
+    )
+
+    position = result.objective_deal_strength["components"]["price_position"]
+    assert result.verdict == "Skip"
+    assert position["assessment"] == "above_unknown_historical_floor"
+    assert position["points"] == 0
+    assert position["observed_floor"] is None
+    assert "lower historical price exists" in position["reason"]
+    assert "historical floor is unknown" in position["reason"]
 
 
 def test_upgrade_intent_uses_stricter_offer_value_bar():
@@ -176,7 +204,7 @@ def test_confidence_labels_reflect_coverage_without_numeric_probability():
 
 
 def test_wait_receipt_has_broad_recurrence_only_for_deep_regular_history():
-    history = tuple(comparator(4.99, day, "prior_comparable") for day in (
+    history = tuple(comparator(4.99, day, "historical_floor") for day in (
         "2025-01-01", "2025-03-01", "2025-05-01", "2025-07-01"
     ))
     result = decide(
@@ -191,7 +219,7 @@ def test_wait_receipt_has_broad_recurrence_only_for_deep_regular_history():
 
 
 def test_irregular_deep_history_has_descriptive_recurrence_without_window():
-    history = tuple(comparator(4.99, day, "prior_comparable") for day in (
+    history = tuple(comparator(4.99, day, "historical_floor") for day in (
         "2025-01-01", "2025-01-08", "2025-06-01", "2026-01-01"
     ))
     result = decide(

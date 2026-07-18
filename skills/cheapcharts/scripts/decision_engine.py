@@ -18,6 +18,7 @@ VERDICTS = ("Buy", "Wait", "Skip")
 CONFIDENCE_LEVELS = ("High", "Medium", "Low")
 PATIENCE_VALUES = ("balanced", "low", "flexible")
 INTENT_VALUES = ("unspecified", "new_purchase", "upgrade")
+FORMAT_CAPABILITY = {"SD": 0, "HD": 1, "4K": 2}
 
 
 @dataclass(frozen=True)
@@ -135,11 +136,9 @@ def _trusted_history(history: Sequence[HistoricalComparator]) -> list[Historical
 
 
 def _historical_floor(history: Sequence[HistoricalComparator]) -> Optional[float]:
+    """Return only a declared historical-floor anchor, never a prior price."""
     floors = [item.price for item in history if item.kind == "historical_floor"]
-    if floors:
-        return min(floors)
-    prices = [item.price for item in history]
-    return min(prices) if prices else None
+    return min(floors) if floors else None
 
 
 def _evidence_conflicts(
@@ -165,6 +164,8 @@ def _apply_constraints(constraints: PurchaseConstraints) -> dict[str, dict[str, 
         raise ValueError(f"intent must be one of: {', '.join(INTENT_VALUES)}")
     if constraints.budget_ceiling is not None and not _valid_price(constraints.budget_ceiling):
         raise ValueError("budget_ceiling must be a finite non-negative number")
+    if constraints.required_format is not None and constraints.required_format.upper() not in FORMAT_CAPABILITY:
+        raise ValueError(f"required_format must be one of: {', '.join(FORMAT_CAPABILITY)}")
 
     return {
         "budget_ceiling": {
@@ -197,6 +198,7 @@ def _objective_assessment(
 ) -> dict[str, Any]:
     current_price = float(offer.current_price)  # hard gate already validated
     floor = _historical_floor(history)
+    prior_prices = [item.price for item in history if item.kind == "prior_comparable"]
     if authoritative_atl is True:
         position_score = 3
         position = "at_the_authoritative_floor"
@@ -212,10 +214,33 @@ def _objective_assessment(
         else:
             position_score, position = 0, "well_above_observed_floor"
         position_reason = f"Current price is compared with an observed floor of {floor:.2f} {offer.currency}."
+    elif authoritative_atl is False:
+        position_score = 0
+        position = "above_unknown_historical_floor"
+        position_reason = (
+            "The authoritative ATL signal confirms a lower historical price exists, "
+            "but the historical floor is unknown from the supplied evidence."
+        )
+    elif prior_prices:
+        prior = min(prior_prices)
+        if current_price < prior:
+            position_score = 1
+            position = "below_prior_comparable_floor_unknown"
+            position_reason = (
+                f"Current price is below a prior comparable price of {prior:.2f} {offer.currency}, "
+                "but that comparison does not establish the historical floor."
+            )
+        else:
+            position_score = 0
+            position = "not_below_prior_comparable_floor_unknown"
+            position_reason = (
+                f"Current price is not below the prior comparable price of {prior:.2f} {offer.currency}; "
+                "the historical floor is unknown."
+            )
     else:
         position_score = 0
-        position = "not_authoritative_atl"
-        position_reason = "The authoritative ATL signal says this selected-tier price is not at its floor."
+        position = "historical_floor_unknown"
+        position_reason = "No supplied evidence establishes the historical floor."
 
     discount_score = 0
     discount_percent = None
@@ -417,10 +442,14 @@ def evaluate_decision(request: DecisionRequest) -> DecisionResult:
             f"above the request budget of {budget:.2f}."
         )
     required_format = request.constraints.required_format
-    if required_format and required_format.casefold() != offer.format_tier.casefold():
-        hard_conflicts.append(
-            f"The current offer is {offer.format_tier}, not the required {required_format} format."
-        )
+    if required_format:
+        required_key = required_format.upper()
+        offered_key = offer.format_tier.upper()
+        if FORMAT_CAPABILITY.get(offered_key, -1) < FORMAT_CAPABILITY[required_key]:
+            hard_conflicts.append(
+                f"The current offer is {offer.format_tier}, below the required minimum "
+                f"{required_key} format."
+            )
 
     baseline = {"strong": "Buy", "fair": "Wait", "weak": "Skip"}[objective["label"]]
     verdict = baseline

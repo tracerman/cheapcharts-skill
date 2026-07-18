@@ -95,7 +95,7 @@ Always label the actual data source. Deals are current deals/price drops. Charts
 
 A decision requires a confidently resolved offer, its current price for the relevant format tier, and at least one trustworthy historical comparator: authoritative ATL status, a parseable historical floor, or a prior comparable price. Ratings and recurrence cadence are optional. If the minimum gate fails, preserve known facts in `insufficient_evidence` and name what is missing. This is a stateless one-title decision, not feed-wide ranking: do not store a profile, create alerts, or promise monitoring.
 
-Apply supplied per-request budget ceiling, patience, required format, and new-purchase-versus-upgrade intent. Omitted constraints use visible neutral defaults; do not invent taste preferences. Keep **objective deal strength** (price position, discount credibility, observed sale behavior) separate from **personal fit** (optional constraints), then combine them into the offer-specific action:
+Apply supplied per-request budget ceiling, patience, required format, and new-purchase-versus-upgrade intent. Required format is a minimum capability (`SD < HD < 4K`): 4K satisfies HD or SD, and HD satisfies SD; it does not force the CLI to price a lower tier. Omitted constraints use visible neutral defaults; do not invent taste preferences. Keep **objective deal strength** (price position, discount credibility, observed sale behavior) separate from **personal fit** (optional constraints), then combine them into the offer-specific action:
 
 - **Buy:** buy this resolved offer now.
 - **Wait:** defer for a plausibly better opportunity.

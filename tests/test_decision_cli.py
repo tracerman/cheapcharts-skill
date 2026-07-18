@@ -65,6 +65,8 @@ def test_human_decision_receipt_matches_structured_hierarchy(monkeypatch, capsys
     assert "Title: Heat | 4K | $4.99" in captured.out
     assert "BUY —" in captured.out
     assert "Objective deal strength: Strong" in captured.out
+    assert "The selected-tier price is flagged at its authoritative all-time low." in captured.out
+    assert "The current offer is 66.7% below its supplied regular price." in captured.out
     assert "Personal fit: neutral defaults" in captured.out
     assert "Evidence coverage:" in captured.out
     assert "Buy link: https://tv.apple.com/us/movie/heat" in captured.out
@@ -121,6 +123,65 @@ def test_missing_comparator_returns_insufficient_evidence_without_verdict(monkey
     assert "verdict" not in envelope
     assert envelope["offer"]["current_price"] == 9.99
     assert any("historical comparator" in item for item in envelope["missing_requirements"])
+
+
+def test_trivial_drop_without_evolution_never_treats_prior_price_as_floor(monkeypatch, capsys):
+    case = load_json("decision_responses.json")["trivial_drop"]
+    rc, captured = invoke_main(
+        monkeypatch, capsys, ["--decide", "Trivial Drop", "--json"], decision_router(case)
+    )
+
+    envelope = json.loads(captured.out)
+    position = envelope["objective_deal_strength"]["components"]["price_position"]
+    assert rc == 0
+    assert envelope["verdict"] == "Skip"
+    assert position["assessment"] == "above_unknown_historical_floor"
+    assert position["points"] == 0
+    assert position["observed_floor"] is None
+    assert "lower historical price exists" in position["reason"]
+    assert "historical floor is unknown" in position["reason"]
+
+
+@pytest.mark.parametrize("required_format", ["SD", "HD"])
+def test_required_format_is_minimum_and_does_not_force_lower_price_tier(
+    monkeypatch, capsys, required_format
+):
+    case = load_json("decision_responses.json")["buy"]
+    case["detail"].update({
+        "priceSd": None,
+        "priceSdBefore": None,
+        "priceSdIsLowest": None,
+    })
+    rc, captured = invoke_main(
+        monkeypatch,
+        capsys,
+        ["--decide", "Heat", "--required-format", required_format, "--json"],
+        decision_router(case),
+    )
+
+    envelope = json.loads(captured.out)
+    assert rc == 0
+    assert envelope["verdict"] == "Buy"
+    assert envelope["offer"]["selected_tier"] == "hd"
+    assert envelope["offer"]["format_tier"] == "4K"
+    assert not envelope["personal_fit"]["hard_constraint_conflicts"]
+
+
+def test_offer_below_required_minimum_format_skips_with_offer_specific_reason(monkeypatch, capsys):
+    case = load_json("decision_responses.json")["buy"]
+    case["detail"]["has4K"] = 0
+    rc, captured = invoke_main(
+        monkeypatch,
+        capsys,
+        ["--decide", "Heat", "--required-format", "4K", "--json"],
+        decision_router(case),
+    )
+
+    envelope = json.loads(captured.out)
+    assert rc == 0
+    assert envelope["verdict"] == "Skip"
+    assert envelope["offer"]["format_tier"] == "HD"
+    assert "below the required minimum 4K format" in envelope["decisive_reason"]
 
 
 def test_ambiguous_decision_returns_candidates_and_never_fetches_detail(monkeypatch, capsys):
@@ -183,6 +244,9 @@ def test_unexpected_decision_failure_still_emits_error_envelope(monkeypatch, cap
         (["--decide", "Heat", "--scoped-json"], "Browse-only"),
         (["--decide", "Heat", "--quality", "4k"], "cannot be combined"),
         (["--json", "--scoped-json"], "alternative structured-output contracts"),
+        (["--title", "Heat", "--scoped-json"], "Browse-only"),
+        (["--title", "Heat", "--history", "--scoped-json"], "Browse-only"),
+        (["--history", "--scoped-json"], "--history requires --title"),
     ],
 )
 def test_invalid_mode_combinations_fail_before_network(monkeypatch, capsys, argv, expected):

@@ -48,7 +48,7 @@ python scripts/deals.py --decide "Heat" --json       # decision/disambiguation/n
 python scripts/deals.py --scoped-json                 # additive scoped Browse envelope
 ```
 
-Decision constraints are `--budget`, `--patience`, `--required-format`, and `--intent`. Omitted constraints use visible neutral defaults. Raw batch `--json` remains the compatibility list/`[]` mode.
+Decision constraints are `--budget`, `--patience`, `--required-format`, and `--intent`. `--required-format` is the minimum acceptable capability (`SD < HD < 4K`), not a request to force pricing onto a lower tier. Omitted constraints use visible neutral defaults. Raw batch `--json` remains the compatibility list/`[]` mode.
 
 ---
 

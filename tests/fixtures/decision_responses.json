@@ -68,6 +68,29 @@
       "cheapChartsProductPageUrl": "https://www.cheapcharts.com/us/itunes/movies/333"
     }
   },
+  "trivial_drop": {
+    "search": [
+      {
+        "title": "Trivial Drop",
+        "releaseYear": 2026,
+        "cheapChartsProductPageUrl": "https://www.cheapcharts.com/us/itunes/movies/334"
+      }
+    ],
+    "detail": {
+      "title": "Trivial Drop",
+      "currency": "USD",
+      "priceHd": 13.99,
+      "priceHdBefore": 14.99,
+      "priceHdIsLowest": 0,
+      "priceHdEvolution": null,
+      "priceSd": null,
+      "priceSdBefore": null,
+      "priceSdIsLowest": null,
+      "has4K": 0,
+      "productPageUrl": "https://tv.apple.com/us/movie/trivial-drop",
+      "cheapChartsProductPageUrl": "https://www.cheapcharts.com/us/itunes/movies/334"
+    }
+  },
   "ambiguous": {
     "search": [
       {
