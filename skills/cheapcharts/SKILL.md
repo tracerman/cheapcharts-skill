@@ -145,7 +145,7 @@ python scripts/deals.py --decide "Heat" --budget 10 --required-format 4k --inten
 python scripts/deals.py --decide "Heat" --json # discriminated decision envelope
 ```
 
-**Exit codes:** `0` deals found, `1` no deals matched (legitimate API-empty or filtered-empty result), `2` API, usage, or response-schema error. In `--json` mode, empty results emit `[]` on stdout and diagnostics go to stderr. Failed DetailData lookups are counted and reported in the table header; if all fail, exit is 2.
+**Exit codes:** `0` deals found or a decision issued, `1` legitimate empty/non-decision state, `2` API, usage, or response-schema error. In raw batch `--json` mode, empty results emit `[]` on stdout and diagnostics go to stderr; decision and scoped Browse modes instead emit their explicit state envelope. Failed DetailData lookups are counted and reported in the table header; if all fail, exit is 2.
 
 Default sort is `latestPricechange` (freshest drops first). Output columns: Title (links to Apple TV) | Fmt | Now | Was | Save | IMDb | RT | Date | ATL | Buy | History.
 

@@ -226,6 +226,20 @@ def _objective_assessment(
         elif discount_percent >= 25:
             discount_score = 1
 
+    dated_events = [item for item in history if item.observed_on]
+    if len(dated_events) >= 4:
+        sale_behavior = "repeated_comparable_sales"
+        sale_behavior_reason = f"History contains {len(dated_events)} dated comparable sale events."
+    elif len(history) >= 2:
+        sale_behavior = "multiple_undated_or_sparse_comparators"
+        sale_behavior_reason = "History contains multiple comparators but not enough dated regularity for cadence."
+    elif history:
+        sale_behavior = "single_historical_anchor"
+        sale_behavior_reason = "Only one historical comparator describes observed sale behavior."
+    else:
+        sale_behavior = "atl_signal_only"
+        sale_behavior_reason = "Sale behavior is not observed beyond the authoritative ATL signal."
+
     score = position_score + discount_score
     if score >= 3:
         label = "strong"
@@ -247,6 +261,11 @@ def _objective_assessment(
                 "assessment": "verified_regular_price" if discount_percent is not None else "not_available",
                 "points": discount_score,
                 "discount_percent": round(discount_percent, 1) if discount_percent is not None else None,
+            },
+            "sale_behavior": {
+                "assessment": sale_behavior,
+                "points": 0,
+                "reason": sale_behavior_reason,
             },
         },
     }

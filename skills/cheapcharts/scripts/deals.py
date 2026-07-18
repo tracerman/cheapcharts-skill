@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-deals.py - CheapCharts deals finder with ATL signal
+deals.py - CheapCharts deals, title evidence, and purchase decisions
 
 Lists current CheapCharts deals (sorted by latest price change by default) and
 flags whether each one is at its all-time low (ATL) using the authoritative
@@ -39,13 +39,16 @@ Usage:
     python deals.py --min-savings 5           # only show items with $5+ savings
     python deals.py --since 1                 # only items whose price changed in the last day
     python deals.py --atl-only                # filter to ATL rows only (v2.x default behavior)
+    python deals.py --decide "Heat"           # one-title Buy / Wait / Skip receipt
+    python deals.py --decide "Heat" --json    # discriminated decision-state envelope
+    python deals.py --scoped-json             # additive provenance-rich Browse envelope
 
 Combined filters (per llms.txt guideline #11):
     python deals.py --genre Horror --max-price 4.99 --min-savings 3 --atl-only
 
 Exit codes:
-    0 - success (at least one deal returned, or single-title check completed)
-    1 - no deals matched / single title not found
+    0 - success (deals returned, factual title checked, or a decision issued)
+    1 - legitimate empty or non-decision state (not found, ambiguous, insufficient evidence)
     2 - API, usage, or response-schema error
 """
 
@@ -60,8 +63,17 @@ import time
 import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import suppress
 from datetime import datetime, timezone
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit
+
+from decision_engine import (
+    DecisionRequest,
+    HistoricalComparator,
+    Offer,
+    PurchaseConstraints,
+    evaluate_decision,
+)
 
 # The markdown table uses non-ASCII glyphs (the ATL checkmark). Windows consoles
 # and pipes default to cp1252, which cannot encode them and kills the whole run
@@ -147,6 +159,9 @@ VALID_GENRES = (
 
 # Valid quality values (per llms.txt)
 VALID_QUALITIES = ("hd4k", "hd", "sd", "4k", "sdOnly")
+DECISION_PATIENCE = ("low", "balanced", "flexible")
+DECISION_FORMATS = ("SD", "HD", "4K")
+DECISION_INTENTS = ("new_purchase", "upgrade")
 
 
 def fetch(url, retries=2):
@@ -242,6 +257,36 @@ def score_match(query, title):
     return 0.45 * ratio + 0.35 * containment + substr
 
 
+def search_candidates(title, store=DEFAULT_STORE, country=DEFAULT_COUNTRY):
+    """Return ranked title candidates plus an API error, if any."""
+    url = (
+        f"{API_BASE}/gptapi/Search.php?action=search&store={store}"
+        f"&country={country}&itemType=all&query={quote(title)}&limit=5"
+    )
+    data = fetch(url)
+    if data.get("status") == "error":
+        return [], data.get("message", "unknown Search error")
+    ranked = sorted(
+        data.get("results", []),
+        key=lambda result: score_match(title, result.get("title")),
+        reverse=True,
+    )
+    candidates = []
+    for result in ranked:
+        itype, sid = get_id_from_url(result.get("cheapChartsProductPageUrl", ""))
+        if not (itype and sid):
+            continue
+        candidates.append({
+            "title": result.get("title"),
+            "item_type": itype,
+            "id_in_store": sid,
+            "score": round(score_match(title, result.get("title")), 4),
+            "cheapcharts_url": result.get("cheapChartsProductPageUrl"),
+            "release_year": result.get("releaseYear"),
+        })
+    return candidates, None
+
+
 def search_id(title, store=DEFAULT_STORE, country=DEFAULT_COUNTRY):
     """Search for a title, return (itype, sid, error_msg) tuple.
 
@@ -254,28 +299,18 @@ def search_id(title, store=DEFAULT_STORE, country=DEFAULT_COUNTRY):
     Returns (None, None, None) if title simply not found.
     Returns (itype, sid, None) on success.
     """
-    url = (
-        f"{API_BASE}/gptapi/Search.php?action=search&store={store}"
-        f"&country={country}&itemType=all&query={quote(title)}&limit=5"
-    )
-    data = fetch(url)
-    if data.get("status") == "error":
-        return None, None, data.get("message", "unknown Search error")
-    results = data.get("results", [])
-    if not results:
+    candidates, error = search_candidates(title, store, country)
+    if error:
+        return None, None, error
+    if not candidates:
         return None, None, None
-    ranked = sorted(results, key=lambda r: score_match(title, r.get("title")), reverse=True)
-    for candidate in ranked:
-        itype, sid = get_id_from_url(candidate.get("cheapChartsProductPageUrl", ""))
-        if itype and sid:
-            best_score = score_match(title, candidate.get("title"))
-            if best_score < 0.6 and len(ranked) > 1:
-                others = "; ".join(r.get("title") or "?" for r in ranked if r is not candidate)[:200]
-                print(f"  warning: weak title match for '{title}' - using '{candidate.get('title')}'",
-                      file=sys.stderr)
-                print(f"  other search hits: {others}", file=sys.stderr)
-            return itype, sid, None
-    return None, None, None
+    best = candidates[0]
+    if best["score"] < 0.6 and len(candidates) > 1:
+        others = "; ".join(candidate.get("title") or "?" for candidate in candidates[1:])[:200]
+        print(f"  warning: weak title match for '{title}' - using '{best.get('title')}'",
+              file=sys.stderr)
+        print(f"  other search hits: {others}", file=sys.stderr)
+    return best["item_type"], best["id_in_store"], None
 
 
 def parse_evolution(evo):
@@ -325,6 +360,17 @@ def positive_float(value):
         raise argparse.ArgumentTypeError("must be a positive number") from exc
     if not math.isfinite(parsed) or parsed <= 0:
         raise argparse.ArgumentTypeError("must be a positive number")
+    return parsed
+
+
+def non_negative_float(value):
+    """Argparse type for finite numeric options whose valid domain includes zero."""
+    try:
+        parsed = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be a non-negative number") from exc
+    if not math.isfinite(parsed) or parsed < 0:
+        raise argparse.ArgumentTypeError("must be a non-negative number")
     return parsed
 
 
@@ -473,12 +519,320 @@ def select_price_tier(node, quality):
     }
 
 
+def scope_value(value, provenance):
+    """Represent one effective-scope dimension with explicit provenance."""
+    return {"value": value, "provenance": provenance}
+
+
+def decision_applied_scope(title, store, country, budget, patience, required_format,
+                           intent, supplied, selected_tier=None):
+    """Build the self-contained effective scope shared by all decision states."""
+    return {
+        "lane": scope_value("decide", "user_set"),
+        "title_query": scope_value(title, "user_set"),
+        "store": scope_value(store, "user_set" if "--store" in supplied else "default"),
+        "country": scope_value(country, "user_set" if "--country" in supplied else "default"),
+        "budget_ceiling": scope_value(
+            budget, "user_set" if "--budget" in supplied else "default"
+        ),
+        "patience": scope_value(
+            patience or "balanced", "user_set" if "--patience" in supplied else "default"
+        ),
+        "required_format": scope_value(
+            required_format or "any",
+            "user_set" if "--required-format" in supplied else "default",
+        ),
+        "intent": scope_value(
+            intent or "unspecified", "user_set" if "--intent" in supplied else "default"
+        ),
+        "selected_tier": scope_value(selected_tier, "derived"),
+    }
+
+
+def browse_applied_scope(item_type, store, country, limit, sort, genre, max_price,
+                         release_year, quality, exclude_bundles, atl_only, since_days,
+                         min_savings, supplied):
+    """Build a complete Browse scope without changing the legacy raw JSON rows."""
+    def source(option):
+        return "user_set" if option in supplied else "default"
+
+    return {
+        "lane": scope_value("browse", "user_set"),
+        "item_type": scope_value(item_type, source("--type")),
+        "store": scope_value(store, source("--store")),
+        "country": scope_value(country, source("--country")),
+        "limit": scope_value(limit, source("--limit")),
+        "sort": scope_value(sort, source("--sort")),
+        "genre": scope_value(genre or "All", source("--genre")),
+        "max_price": scope_value(max_price, source("--max-price")),
+        "release_year": scope_value(release_year, source("--release-year")),
+        "quality": scope_value(quality, source("--quality")),
+        "exclude_bundles": scope_value(exclude_bundles, source("--exclude-bundles")),
+        "atl_only": scope_value(atl_only, source("--atl-only")),
+        "since_days": scope_value(since_days, source("--since")),
+        "minimum_savings": scope_value(min_savings, source("--min-savings")),
+    }
+
+
+def print_json_envelope(envelope):
+    print(json.dumps(envelope, indent=2))
+
+
+def decision_error_envelope(title, store, country, constraints, supplied, message):
+    return {
+        "state": "error",
+        "request": {"mode": "decide", "title": title},
+        "applied_scope": decision_applied_scope(
+            title, store, country, constraints.budget_ceiling, constraints.patience,
+            constraints.required_format, constraints.intent, supplied,
+        ),
+        "error": {"message": str(message), "retryable": True},
+        "next_action": "Retry the same decision request after the data source recovers.",
+    }
+
+
+def resolve_decision_candidate(title, store, country):
+    """Resolve a title conservatively for advice, returning a state plus payload."""
+    candidates, error = search_candidates(title, store, country)
+    if error:
+        return "error", {"message": error, "retryable": True}
+    if not candidates:
+        return "not_found", None
+
+    exact = [candidate for candidate in candidates if _norm_title(candidate["title"]) == _norm_title(title)]
+    if len(exact) == 1:
+        return "resolved", exact[0]
+
+    best = candidates[0]
+    runner_up = candidates[1] if len(candidates) > 1 else None
+    ambiguous = best["score"] < 0.72 or (
+        runner_up is not None and best["score"] - runner_up["score"] < 0.12
+    )
+    if ambiguous:
+        return "disambiguation", candidates
+    return "resolved", best
+
+
+def decision_price_tier(node, required_format):
+    """Select one coherent DetailData tier and label the actual offered format."""
+    quality = "sd" if required_format == "SD" else "hd"
+    selected = select_price_tier(node, quality)
+    api_tier = selected["tier"].title()
+    selected["atl_signal"] = node.get(f"price{api_tier}IsLowest")
+    selected["evolution"] = node.get(f"price{api_tier}Evolution")
+    if selected["tier"] == "sd":
+        selected["format"] = "SD"
+    elif node.get("has4K") in (1, True):
+        selected["format"] = "4K"
+    else:
+        selected["format"] = "HD"
+    return selected
+
+
+def decision_comparators(selected):
+    """Adapt selected-tier history into trustworthy floor/comparable evidence."""
+    entries = parse_evolution(selected.get("evolution"))
+    comparators = []
+    if entries:
+        floor = min(price for _, _, price in entries)
+        comparators.extend(
+            HistoricalComparator(price=price, observed_on=observed_on, kind="historical_floor")
+            for observed_on, _direction, price in entries
+            if abs(price - floor) <= 0.01
+        )
+    was = selected.get("was")
+    if was is not None:
+        with suppress(TypeError, ValueError):
+            comparators.append(HistoricalComparator(price=float(was), kind="prior_comparable"))
+    return tuple(comparators)
+
+
+def render_decision_human(envelope):
+    """Render the layered human form from the same structured decision facts."""
+    state = envelope["state"]
+    scope = envelope["applied_scope"]
+    scope_line = (
+        f"Scope: Decide | store={scope['store']['value']} ({scope['store']['provenance']}) | "
+        f"country={scope['country']['value']} ({scope['country']['provenance']}) | "
+        f"budget={scope['budget_ceiling']['value'] if scope['budget_ceiling']['value'] is not None else 'none'} "
+        f"({scope['budget_ceiling']['provenance']}) | patience={scope['patience']['value']} "
+        f"({scope['patience']['provenance']}) | required-format={scope['required_format']['value']} "
+        f"({scope['required_format']['provenance']}) | intent={scope['intent']['value']} "
+        f"({scope['intent']['provenance']})"
+    )
+    lines = [scope_line]
+    if state == "not_found":
+        lines.append(f"Not found: {envelope['request']['title']}")
+        lines.append(envelope["next_action"])
+        return "\n".join(lines)
+    if state == "error":
+        lines.append(f"Error: {envelope['error']['message']}")
+        lines.append(envelope["next_action"])
+        return "\n".join(lines)
+    if state == "disambiguation":
+        lines.append("I need one title confirmation before giving purchase advice:")
+        for index, candidate in enumerate(envelope["candidates"], 1):
+            year = f" ({candidate['release_year']})" if candidate.get("release_year") else ""
+            lines.append(
+                f"  {index}. {candidate['title']}{year} "
+                f"[{candidate['item_type']}, {candidate['id_in_store']}]"
+            )
+        lines.append(envelope["next_action"])
+        return "\n".join(lines)
+
+    offer = envelope["offer"]
+    lines.append(
+        f"Title: {offer['title']} | {offer['format_tier']} | "
+        f"{format_money(offer['current_price'], offer['currency'], 'g')}"
+    )
+    if state == "insufficient_evidence":
+        lines.append("Insufficient evidence — no Buy / Wait / Skip verdict issued.")
+        if envelope.get("missing_requirements"):
+            lines.append("Missing: " + "; ".join(envelope["missing_requirements"]))
+        if envelope.get("conflicts"):
+            lines.append("Conflicts: " + "; ".join(envelope["conflicts"]))
+        lines.append(envelope["next_action"])
+        return "\n".join(lines)
+
+    lines.append(
+        f"{envelope['verdict'].upper()} — {envelope['confidence']} confidence: "
+        f"{envelope['decisive_reason']}"
+    )
+    objective = envelope["objective_deal_strength"]
+    lines.append(
+        f"Objective deal strength: {objective['label'].title()} "
+        f"(transparent component score {objective['component_score']})."
+    )
+    personal = envelope["personal_fit"]
+    lines.append(
+        f"Personal fit: {personal['assessment'].replace('_', ' ')}; "
+        f"{personal['effect'].replace('_', ' ')}."
+    )
+    coverage = envelope["evidence_coverage"]
+    lines.append(
+        f"Evidence coverage: {coverage['trustworthy_historical_comparators']} trustworthy comparator(s), "
+        f"{coverage['dated_comparators']} dated; missing: "
+        f"{', '.join(coverage['missing_signals']) or 'none'}."
+    )
+    recurrence = envelope.get("recurrence")
+    if recurrence:
+        if recurrence.get("eligible"):
+            lines.append(f"Recurrence: {recurrence['broad_window']}; {recurrence['guidance']}")
+        else:
+            lines.append(f"Recurrence: {recurrence['guidance']}")
+    lines.append("Applied constraints:")
+    for name, value in envelope["applied_constraints"].items():
+        display = value["value"] if value["value"] is not None else value["default_meaning"]
+        lines.append(f"  - {name}: {display} ({value['source']})")
+    for caveat in envelope["caveats"]:
+        lines.append(f"Caveat: {caveat}")
+    if offer.get("store_url"):
+        lines.append(f"Buy link: {offer['store_url']}")
+    if offer.get("cheapcharts_url"):
+        lines.append(f"Price history: {offer['cheapcharts_url']}")
+    return "\n".join(lines)
+
+
+def check_decision(title, store=DEFAULT_STORE, country=DEFAULT_COUNTRY, budget=None,
+                   patience=None, required_format=None, intent=None, output_json=False,
+                   supplied=None):
+    """Resolve one title, evaluate its selected-tier evidence, and emit one state."""
+    supplied = supplied or set()
+    constraints = PurchaseConstraints(
+        budget_ceiling=budget,
+        patience=patience,
+        required_format=required_format,
+        intent=intent,
+    )
+    resolution_state, payload = resolve_decision_candidate(title, store, country)
+    scope = decision_applied_scope(
+        title, store, country, budget, patience, required_format, intent, supplied,
+    )
+    shared = {
+        "request": {"mode": "decide", "title": title},
+        "applied_scope": scope,
+    }
+    if resolution_state == "error":
+        envelope = {
+            "state": "error", **shared, "error": payload,
+            "next_action": "Retry the same decision request after the data source recovers.",
+        }
+        rc = 2
+    elif resolution_state == "not_found":
+        envelope = {
+            "state": "not_found", **shared,
+            "next_action": "Check the title spelling or add a release year.",
+        }
+        rc = 1
+    elif resolution_state == "disambiguation":
+        envelope = {
+            "state": "disambiguation", **shared, "candidates": payload,
+            "next_action": "Choose one candidate by title and identity, then retry --decide.",
+        }
+        rc = 1
+    else:
+        candidate = payload
+        node = fetch_detail(candidate["item_type"], candidate["id_in_store"], store, country)
+        if not node or node.get("_error"):
+            message = node.get("_error", "empty DetailData response") if node else "empty DetailData response"
+            envelope = {
+                "state": "error", **shared,
+                "title": candidate,
+                "error": {"message": message, "retryable": True},
+                "next_action": "Retry the same decision request after title detail data recovers.",
+            }
+            rc = 2
+        else:
+            selected = decision_price_tier(node, required_format)
+            scope["selected_tier"] = scope_value(selected["tier"], "derived")
+            currency = resolve_currency(node.get("currency"), country)
+            actual_title = node.get("title") or candidate["title"]
+            request = DecisionRequest(
+                offer=Offer(
+                    title=actual_title,
+                    title_id=candidate["id_in_store"],
+                    store=store,
+                    country=country,
+                    format_tier=selected["format"],
+                    current_price=selected["price"],
+                    currency=currency,
+                    regular_price=selected["was"],
+                ),
+                history=decision_comparators(selected),
+                constraints=constraints,
+                authoritative_atl=(
+                    selected["atl_signal"] == 1 if selected["atl_signal"] in (0, 1) else None
+                ),
+            )
+            result = evaluate_decision(request).to_dict()
+            envelope = {**shared, **result}
+            envelope["offer"].update({
+                "item_type": candidate["item_type"],
+                "selected_tier": selected["tier"],
+                "store_url": node.get("productPageUrl") or node.get("iTunesUrl"),
+                "cheapcharts_url": node.get("cheapChartsProductPageUrl") or candidate.get("cheapcharts_url"),
+            })
+            rc = 0 if envelope["state"] == "decision" else 1
+
+    if output_json:
+        print_json_envelope(envelope)
+    else:
+        print(render_decision_human(envelope))
+    return rc
+
+
 def check_batch(item_type, store=DEFAULT_STORE, country=DEFAULT_COUNTRY, limit=DEFAULT_LIMIT,
                 min_savings=None, output_json=False, sort=DEFAULT_SORT,
                 genre=None, max_price=None, release_year=None, quality=None,
-                exclude_bundles=False, atl_only=False, since_days=None):
+                exclude_bundles=False, atl_only=False, since_days=None,
+                output_scoped_json=False, supplied=None):
     """Pull current deals with optional filters, then in parallel verify
     each via DetailData's IsLowest flag."""
+    supplied = supplied or set()
+    applied_scope = browse_applied_scope(
+        item_type, store, country, limit, sort, genre, max_price, release_year,
+        quality, exclude_bundles, atl_only, since_days, min_savings, supplied,
+    )
     deals_url = build_deals_url(
         item_type, store, country, limit, sort, genre, max_price, release_year, quality
     )
@@ -486,6 +840,14 @@ def check_batch(item_type, store=DEFAULT_STORE, country=DEFAULT_COUNTRY, limit=D
     data = fetch(deals_url)
     if data.get("status") != "success":
         msg = data.get("message", "unknown")
+        if output_scoped_json:
+            print_json_envelope({
+                "state": "error",
+                "request": {"mode": "browse"},
+                "applied_scope": applied_scope,
+                "error": {"message": msg, "retryable": True},
+                "next_action": "Retry the same Browse scope after the data source recovers.",
+            })
         print(f"  deals fetch failed: {msg}", file=sys.stderr)
         if store != DEFAULT_STORE:
             print(f"  note: CheapCharts' Deals endpoint is most stable for iTunes. For {store},", file=sys.stderr)
@@ -493,7 +855,16 @@ def check_batch(item_type, store=DEFAULT_STORE, country=DEFAULT_COUNTRY, limit=D
         return 2
     deals = data.get("results", {}).get(item_type, [])
     if not deals:
-        if output_json:
+        if output_scoped_json:
+            print_json_envelope({
+                "state": "empty",
+                "request": {"mode": "browse"},
+                "applied_scope": applied_scope,
+                "results": [],
+                "next_action": "Relax one filter or choose a wider window without changing this scope silently.",
+            })
+            print(f"  no {item_type} deals returned", file=sys.stderr)
+        elif output_json:
             print("[]")
             print(f"  no {item_type} deals returned", file=sys.stderr)
         else:
@@ -514,7 +885,15 @@ def check_batch(item_type, store=DEFAULT_STORE, country=DEFAULT_COUNTRY, limit=D
             continue
         candidates.append((d, itype, sid))
     if unresolvable == len(deals):
-        if output_json:
+        if output_scoped_json:
+            print_json_envelope({
+                "state": "error",
+                "request": {"mode": "browse"},
+                "applied_scope": applied_scope,
+                "error": {"message": "No Deals item had a usable canonical title identity.", "retryable": False},
+                "next_action": "Treat this as response-schema drift; do not use positional rows.",
+            })
+        elif output_json:
             print("[]")
         print(f"  none of {len(deals)} Deals items had a usable cheapChartsProductPageUrl "
               "- response URL schema drift?", file=sys.stderr)
@@ -605,10 +984,36 @@ def check_batch(item_type, store=DEFAULT_STORE, country=DEFAULT_COUNTRY, limit=D
         print(f"  warning: {failed} of {len(candidates)} DetailData lookups failed - "
               f"results may be incomplete", file=sys.stderr)
     if failed and failed == len(candidates):
+        if output_scoped_json:
+            print_json_envelope({
+                "state": "error",
+                "request": {"mode": "browse"},
+                "applied_scope": applied_scope,
+                "error": {"message": "All DetailData lookups failed.", "retryable": True},
+                "next_action": "Retry the same Browse scope after DetailData recovers.",
+            })
         print("  all DetailData lookups failed - treating as API error", file=sys.stderr)
         return 2
 
-    if output_json:
+    if output_scoped_json:
+        state = "results" if atl else "empty"
+        envelope = {
+            "state": state,
+            "request": {"mode": "browse"},
+            "applied_scope": applied_scope,
+            "results": atl,
+            "result_metadata": {
+                "candidate_count": len(candidates),
+                "detail_failures": failed,
+                "canonical_identity": "cheapChartsProductPageUrl",
+            },
+        }
+        if state == "empty":
+            envelope["next_action"] = (
+                "No rows matched the effective scope; relax one filter without changing this scope silently."
+            )
+        print_json_envelope(envelope)
+    elif output_json:
         print(json.dumps(atl, indent=2))
     else:
         filter_desc = []
@@ -691,11 +1096,17 @@ def format_atl_markdown(atl, item_type, candidates_count, filter_desc, failed_co
 
 def main():
     p = argparse.ArgumentParser(
-        description="CheapCharts All-Time-Low (ATL) checker",
+        description="CheapCharts deals, factual title evidence, and Buy / Wait / Skip decisions",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="Combined filters example: python deals.py --genre Horror --max-price 4.99 --min-savings 3"
+        epilog=(
+            "Browse: python deals.py --genre Horror --max-price 4.99 --min-savings 3\n"
+            "Decide: python deals.py --decide \"Heat\" --budget 10 --required-format 4K"
+        ),
     )
-    p.add_argument("--title", help="Check a single title (resolves via Search)")
+    title_mode = p.add_mutually_exclusive_group()
+    title_mode.add_argument("--title", help="Inspect one title factually (resolves via Search)")
+    title_mode.add_argument("--decide", metavar="TITLE",
+                            help="Decide whether to Buy / Wait / Skip one resolved title")
     p.add_argument("--history", action="store_true",
                    help="With --title: also print the tracked price-history timeline "
                         "(sale windows, historical floor) parsed from the evolution data")
@@ -733,10 +1144,54 @@ def main():
     p.add_argument("--atl-only", action="store_true",
                    help="Filter to ATL (all-time-low) rows only. v2.x default behavior; "
                         "v3.0 defaults to showing all deals with ATL as a column flag.")
-    p.add_argument("--json", action="store_true", help="Emit JSON (batch mode only)")
+    p.add_argument("--budget", type=non_negative_float, default=None,
+                   help="With --decide: personal budget ceiling in the selected market currency")
+    p.add_argument("--patience", choices=DECISION_PATIENCE, default=None,
+                   help="With --decide: low, balanced, or flexible waiting preference")
+    p.add_argument("--required-format", type=str.upper, choices=DECISION_FORMATS, default=None,
+                   help="With --decide: require SD, HD, or 4K for this offer")
+    p.add_argument("--intent", choices=("new", "new_purchase", "upgrade"), default=None,
+                   help="With --decide: new/new_purchase or upgrade intent")
+    p.add_argument("--json", action="store_true",
+                   help="Emit raw JSON rows in Browse, or the decision envelope with --decide")
+    p.add_argument("--scoped-json", action="store_true",
+                   help="Emit the additive provenance-rich Browse envelope; raw --json remains compatible")
     args = p.parse_args()
 
     supplied = supplied_long_options(sys.argv[1:])
+    if args.intent == "new":
+        args.intent = "new_purchase"
+
+    decision_only = {"--budget", "--patience", "--required-format", "--intent"}
+    used_decision_only = sorted(decision_only & supplied)
+    if used_decision_only and not args.decide:
+        print(f"  {', '.join(used_decision_only)} require --decide TITLE", file=sys.stderr)
+        return 2
+
+    if args.json and args.scoped_json:
+        print("  --json and --scoped-json are alternative structured-output contracts", file=sys.stderr)
+        return 2
+
+    if args.decide and args.scoped_json:
+        print("  --scoped-json is Browse-only; use --decide TITLE --json for a decision envelope",
+              file=sys.stderr)
+        return 2
+
+    if args.decide and args.type == "rentalmovies":
+        print("  --type rentalmovies is unavailable: Deals/Charts reject rentalmovies, "
+              "and Prices silently returns purchase data instead of rental prices "
+              "(Pitfall #38)", file=sys.stderr)
+        return 2
+
+    if args.decide:
+        incompatible = sorted(
+            set(TITLE_BATCH_ONLY_OPTIONS + ("--history",)) & supplied
+        )
+        if incompatible:
+            print(f"  --decide cannot be combined with Browse/Inspect option(s): {', '.join(incompatible)}",
+                  file=sys.stderr)
+            return 2
+
     if args.title and args.type == "rentalmovies":
         print("  --type rentalmovies is unavailable: Deals/Charts reject rentalmovies, "
               "and Prices silently returns purchase data instead of rental prices "
@@ -785,6 +1240,18 @@ def main():
         return 2
 
     try:
+        if args.decide:
+            return check_decision(
+                args.decide,
+                store=args.store,
+                country=args.country,
+                budget=args.budget,
+                patience=args.patience,
+                required_format=args.required_format,
+                intent=args.intent,
+                output_json=args.json,
+                supplied=supplied,
+            )
         if args.title:
             return check_single_title(args.title, args.store, args.country, show_history=args.history)
         if args.store == "games":
@@ -808,8 +1275,32 @@ def main():
             exclude_bundles=args.exclude_bundles,
             atl_only=args.atl_only,
             since_days=args.since,
+            output_scoped_json=args.scoped_json,
+            supplied=supplied,
         )
     except Exception as e:
+        if args.decide and args.json:
+            constraints = PurchaseConstraints(
+                budget_ceiling=args.budget,
+                patience=args.patience,
+                required_format=args.required_format,
+                intent=args.intent,
+            )
+            print_json_envelope(decision_error_envelope(
+                args.decide, args.store, args.country, constraints, supplied, e,
+            ))
+        elif args.scoped_json:
+            print_json_envelope({
+                "state": "error",
+                "request": {"mode": "browse"},
+                "applied_scope": browse_applied_scope(
+                    args.type, args.store, args.country, args.limit, args.sort, args.genre,
+                    args.max_price, args.release_year, args.quality, args.exclude_bundles,
+                    args.atl_only, args.since, args.min_savings, supplied,
+                ),
+                "error": {"message": str(e), "retryable": True},
+                "next_action": "Retry the same Browse scope after the data source recovers.",
+            })
         print(f"  error: {e}", file=sys.stderr)
         return 2
 

@@ -1,0 +1,85 @@
+{
+  "buy": {
+    "search": [
+      {
+        "title": "Heat",
+        "releaseYear": 1995,
+        "cheapChartsProductPageUrl": "https://www.cheapcharts.com/us/itunes/movies/111"
+      }
+    ],
+    "detail": {
+      "title": "Heat",
+      "currency": "USD",
+      "priceHd": 4.99,
+      "priceHdBefore": 14.99,
+      "priceHdIsLowest": 1,
+      "priceHdEvolution": "2026-07-01:-4.99~2026-05-01:+14.99~2026-03-01:-4.99~2026-01-01:+14.99~2025-11-01:-4.99~2025-09-01:+14.99~2025-07-01:-4.99~2025-05-01:14.99",
+      "priceSd": 3.99,
+      "priceSdBefore": 9.99,
+      "priceSdIsLowest": 1,
+      "has4K": 1,
+      "productPageUrl": "https://tv.apple.com/us/movie/heat",
+      "cheapChartsProductPageUrl": "https://www.cheapcharts.com/us/itunes/movies/111"
+    }
+  },
+  "wait": {
+    "search": [
+      {
+        "title": "Patient Movie",
+        "releaseYear": 2024,
+        "cheapChartsProductPageUrl": "https://www.cheapcharts.com/us/itunes/movies/222"
+      }
+    ],
+    "detail": {
+      "title": "Patient Movie",
+      "currency": "USD",
+      "priceHd": 6.99,
+      "priceHdBefore": null,
+      "priceHdIsLowest": 0,
+      "priceHdEvolution": "2026-07-01:+6.99~2026-05-01:+9.99~2026-03-01:-5.99~2026-01-01:+9.99~2025-11-01:-5.99~2025-09-01:+9.99~2025-07-01:-5.99~2025-05-01:+9.99~2025-03-01:-5.99~2025-01-01:9.99",
+      "priceSd": null,
+      "priceSdBefore": null,
+      "priceSdIsLowest": null,
+      "has4K": 0,
+      "productPageUrl": "https://tv.apple.com/us/movie/patient-movie",
+      "cheapChartsProductPageUrl": "https://www.cheapcharts.com/us/itunes/movies/222"
+    }
+  },
+  "insufficient": {
+    "search": [
+      {
+        "title": "Sparse Movie",
+        "releaseYear": 2025,
+        "cheapChartsProductPageUrl": "https://www.cheapcharts.com/us/itunes/movies/333"
+      }
+    ],
+    "detail": {
+      "title": "Sparse Movie",
+      "currency": "USD",
+      "priceHd": 9.99,
+      "priceHdBefore": null,
+      "priceHdIsLowest": null,
+      "priceHdEvolution": null,
+      "priceSd": null,
+      "priceSdBefore": null,
+      "priceSdIsLowest": null,
+      "has4K": 0,
+      "productPageUrl": "https://tv.apple.com/us/movie/sparse-movie",
+      "cheapChartsProductPageUrl": "https://www.cheapcharts.com/us/itunes/movies/333"
+    }
+  },
+  "ambiguous": {
+    "search": [
+      {
+        "title": "Dune",
+        "releaseYear": 2021,
+        "cheapChartsProductPageUrl": "https://www.cheapcharts.com/us/itunes/movies/444"
+      },
+      {
+        "title": "Dune",
+        "releaseYear": 1984,
+        "cheapChartsProductPageUrl": "https://www.cheapcharts.com/us/itunes/movies/555"
+      }
+    ]
+  }
+}
