@@ -1,7 +1,7 @@
 ---
 name: cheapcharts
 description: "Browse digital movie and TV deals, inspect one title's price evidence, or decide Buy / Wait / Skip on a current offer across iTunes/Apple TV, Amazon, Vudu, and Google Play via the free CheapCharts public API (no auth or API key). Produces factual deal and history results plus transparent one-title decision receipts. Use for prices, sales, price drops, history, all-time lows, or purchase advice."
-version: 3.3.0
+version: 3.4.0
 license: MIT
 metadata:
   author: tracerman
